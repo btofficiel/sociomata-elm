@@ -1,7 +1,8 @@
 module Page.Loading exposing (body, emptyState, getAvatarURL, header, loadingView)
 
-import Html exposing (Attribute, Html, div, img, li, section, span, text, ul)
-import Html.Attributes exposing (class, src, style)
+import Html exposing (Attribute, Html, a, div, img, li, section, span, text, ul)
+import Html.Attributes exposing (class, href, id, src, style)
+import Html.Events exposing (onClick)
 import Profile exposing (Config)
 import RemoteData exposing (WebData)
 import Route exposing (Route)
@@ -17,6 +18,16 @@ checkIfActive route menuName =
             []
 
 
+getHref : String -> String
+getHref navItem =
+    case navItem of
+        "Queue" ->
+            "/app/"
+
+        _ ->
+            "/app/"
+
+
 getAvatarURL : Maybe String -> String
 getAvatarURL avatar =
     case avatar of
@@ -24,11 +35,19 @@ getAvatarURL avatar =
             url
 
         Nothing ->
-            "https://pbs.twimg.com/profile_images/1307543302778970117/BvktyftG_400x400.jpg"
+            "/images/user.png"
 
 
-header : Route -> Maybe String -> Html msg
-header route avatar =
+headerNavItem : Route -> String -> Html msg
+headerNavItem route navItem =
+    a [ href (getHref navItem) ]
+        [ li (checkIfActive route navItem)
+            [ text navItem ]
+        ]
+
+
+header : Route -> Maybe String -> Bool -> ( msg, msg ) -> Html msg
+header route avatar visible ( toggle, logout ) =
     section [ class "header" ]
         [ img
             [ class "logo"
@@ -36,11 +55,39 @@ header route avatar =
             ]
             []
         , ul [ class "nav" ] <|
-            List.map (\mi -> li (checkIfActive route mi) [ text mi ]) <|
-                [ "Queue", "Board", "Categories", "Plugs" ]
+            List.map (headerNavItem route) <|
+                [ {--"Queue", "Board", "Categories", "Plugs"--}
+                  "Queue"
+                ]
         , span [ class "logo-wrapper" ]
-            [ img [ class "avatar-header", src (getAvatarURL avatar) ]
+            [ img
+                [ id "user-avatar"
+                , class "avatar-header"
+                , onClick toggle
+                , src (getAvatarURL avatar)
+                ]
                 []
+            , span
+                [ class "post-menu"
+                , id "menu"
+                , style "display"
+                    (case visible of
+                        True ->
+                            "block"
+
+                        False ->
+                            "none"
+                    )
+                ]
+                [ ul [ class "settings-menu" ]
+                    [ li []
+                        [ a [ href "/app/settings" ]
+                            [ text "Settings"
+                            ]
+                        ]
+                    , li [ onClick logout ] [ text "Logout" ]
+                    ]
+                ]
 
             {---
             , div
@@ -54,7 +101,12 @@ header route avatar =
 body : Html msg
 body =
     div [ class "loading-container" ]
-        [ span [] [ text "sociomata" ]
+        [ div [ style "display" "flex", style "flex-direction" "column", style "align-items" "center", style "row-gap" "30px", style "font-family" "'Work Sans', sans-serif" ]
+            [ img [ src "/images/logo_gray.png", style "width" "12rem", style "justify-content" "center" ] []
+            , div [ class "progress-bar" ]
+                [ div [ class "progress-bar-value" ] []
+                ]
+            ]
         ]
 
 
@@ -68,9 +120,8 @@ emptyState height message =
         ]
 
 
-loadingView : Route -> WebData Config -> Html msg
-loadingView route config =
+loadingView : WebData Config -> Html msg
+loadingView config =
     div []
-        [ header route (Profile.getAvatar config)
-        , body
+        [ body
         ]

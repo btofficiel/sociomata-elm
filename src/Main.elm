@@ -1,4 +1,4 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 import Api
 import Browser exposing (Document, UrlRequest)
@@ -7,6 +7,8 @@ import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick)
 import Http
+import Page.CreatePost as CreatePost
+import Page.EditPost as EditPost
 import Page.Loading as Loading
 import Page.Queue as Queue
 import Page.Settings as Settings
@@ -26,6 +28,7 @@ type alias Model =
     , config : WebData Config
     , auth : AuthenticationStatus
     , navKey : Nav.Key
+    , toggleMenu : Bool
     }
 
 
@@ -39,15 +42,22 @@ type Page
     = NotFoundPage
     | LoadingPage
     | QueuePage Queue.Model
+    | CreatePostPage CreatePost.Model
+    | EditPostPage EditPost.Model
     | SettingsPage Settings.Model
 
 
 type Msg
     = LinkClicked UrlRequest
     | QueueMsg Queue.Msg
+    | CreatePostMsg CreatePost.Msg
+    | EditPostMsg EditPost.Msg
     | SettingsMsg Settings.Msg
     | GotConfig Route Token (WebData Config)
     | UrlChanged Url
+    | ToggleMenu
+    | TurnOffMenu
+    | Logout
 
 
 getToken : AuthenticationStatus -> Token
@@ -95,9 +105,13 @@ init flags url navKey =
             , config = RemoteData.Loading
             , auth = Unknown (parseUrl url)
             , navKey = navKey
+            , toggleMenu = False
             }
     in
-    initCurrentPage ( model, fetchConfig (Maybe.withDefault "invalid_token" flags) (parseRoute model.auth) )
+    initCurrentPage
+        ( model
+        , fetchConfig (Maybe.withDefault "invalid_token" flags) (parseRoute model.auth)
+        )
 
 
 initCurrentPage : ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
@@ -118,8 +132,19 @@ initCurrentPage ( model, existingCmds ) =
                     in
                     ( QueuePage pageModel, Cmd.map QueueMsg pageCmds )
 
-                Route.CreatePostQuery query ->
-                    ( LoadingPage, Cmd.none )
+                Route.EditPost postId ->
+                    let
+                        ( pageModel, pageCmds ) =
+                            EditPost.init postId (getToken model.auth)
+                    in
+                    ( EditPostPage pageModel, Cmd.map EditPostMsg pageCmds )
+
+                Route.CreatePost query ->
+                    let
+                        ( pageModel, pageCmds ) =
+                            CreatePost.init
+                    in
+                    ( CreatePostPage pageModel, Cmd.map CreatePostMsg pageCmds )
 
                 Route.Settings ->
                     let
@@ -131,15 +156,14 @@ initCurrentPage ( model, existingCmds ) =
                                 RemoteData.Success config ->
                                     case config.profile of
                                         Just profile ->
-                                            Debug.log (Debug.toString profile)
-                                                ( { pageModel
-                                                    | name = profile.name
-                                                    , timezone = profile.timezoneId
-                                                    , avatar = profile.avatar
-                                                    , email = config.email
-                                                  }
-                                                , pageCmds
-                                                )
+                                            ( { pageModel
+                                                | name = profile.name
+                                                , timezone = profile.timezoneId
+                                                , avatar = profile.avatar
+                                                , email = config.email
+                                              }
+                                            , pageCmds
+                                            )
 
                                         Nothing ->
                                             ( { pageModel
@@ -149,12 +173,10 @@ initCurrentPage ( model, existingCmds ) =
                                             )
 
                                 RemoteData.Loading ->
-                                    Debug.log "Here!!"
-                                        ( pageModel, pageCmds )
+                                    ( pageModel, pageCmds )
 
                                 _ ->
-                                    Debug.log "Here"
-                                        ( pageModel, pageCmds )
+                                    ( pageModel, pageCmds )
                     in
                     ( SettingsPage updatedPageModel, Cmd.map SettingsMsg updatePageCmds )
     in
@@ -178,8 +200,11 @@ currentTitle route =
         Route.Loading ->
             "Loading..."
 
-        Route.CreatePostQuery query ->
+        Route.CreatePost query ->
             "Create Post - Sociomata"
+
+        Route.EditPost postId ->
+            "Edit Post - Sociomata"
 
         Route.Index ->
             "Posts - Sociomata"
@@ -193,20 +218,31 @@ currentTitle route =
 
 currentView : Model -> Html Msg
 currentView model =
-    case model.page of
-        LoadingPage ->
-            Loading.loadingView model.route model.config
+    div []
+        [ Loading.header model.route (Profile.getAvatar model.config) model.toggleMenu ( ToggleMenu, Logout )
+        , case model.page of
+            LoadingPage ->
+                Loading.loadingView model.config
 
-        NotFoundPage ->
-            Loading.loadingView model.route model.config
+            NotFoundPage ->
+                Loading.loadingView model.config
 
-        QueuePage pageModel ->
-            Queue.view pageModel (getToken model.auth) model.route model.config
-                |> Html.map QueueMsg
+            EditPostPage pageModel ->
+                EditPost.view pageModel model.config
+                    |> Html.map EditPostMsg
 
-        SettingsPage pageModel ->
-            Settings.view pageModel (getToken model.auth) model.route model.config
-                |> Html.map SettingsMsg
+            CreatePostPage pageModel ->
+                CreatePost.view pageModel model.config
+                    |> Html.map CreatePostMsg
+
+            QueuePage pageModel ->
+                Queue.view pageModel model.config
+                    |> Html.map QueueMsg
+
+            SettingsPage pageModel ->
+                Settings.view pageModel model.config
+                    |> Html.map SettingsMsg
+        ]
 
 
 view : Model -> Document Msg
@@ -239,28 +275,87 @@ update msg model =
                         , Cmd.none
                         )
 
-        ( LinkClicked _, _ ) ->
-            ( model, Cmd.none )
+        ( LinkClicked urlRequest, _ ) ->
+            case urlRequest of
+                Browser.Internal url ->
+                    ( model
+                    , Nav.pushUrl model.navKey (Url.toString url)
+                    )
 
-        ( UrlChanged _, _ ) ->
-            ( model, Cmd.none )
+                Browser.External url ->
+                    ( model
+                    , Nav.load url
+                    )
+
+        ( ToggleMenu, _ ) ->
+            let
+                toggle =
+                    case model.toggleMenu of
+                        True ->
+                            False
+
+                        False ->
+                            True
+            in
+            ( { model | toggleMenu = toggle }, Cmd.none )
+
+        ( TurnOffMenu, _ ) ->
+            ( { model | toggleMenu = False }, Cmd.none )
+
+        ( Logout, _ ) ->
+            ( model
+            , Cmd.batch
+                [ Api.deleteToken ()
+                , Nav.load "/login"
+                ]
+            )
+
+        ( UrlChanged url, _ ) ->
+            let
+                newRoute =
+                    Route.parseUrl url
+            in
+            ( { model | route = newRoute }, Cmd.none )
+                |> initCurrentPage
+
+        ( EditPostMsg subMsg, EditPostPage pageModel ) ->
+            let
+                ( updatedPageModel, updateCmds ) =
+                    EditPost.update subMsg pageModel (Profile.getOffset model.config) (getToken model.auth)
+            in
+            ( { model | page = EditPostPage updatedPageModel }, Cmd.map EditPostMsg updateCmds )
+
+        ( CreatePostMsg subMsg, CreatePostPage pageModel ) ->
+            let
+                ( updatedPageModel, updateCmds ) =
+                    CreatePost.update subMsg pageModel (Profile.getOffset model.config) (getToken model.auth)
+            in
+            ( { model | page = CreatePostPage updatedPageModel }, Cmd.map CreatePostMsg updateCmds )
 
         ( QueueMsg subMsg, QueuePage pageModel ) ->
             let
                 ( updatedPageModel, updateCmds ) =
-                    Queue.update subMsg pageModel (Profile.getOffset model.config)
+                    Queue.update subMsg pageModel (Profile.getOffset model.config) (getToken model.auth) model.navKey
             in
             ( { model | page = QueuePage updatedPageModel }, Cmd.map QueueMsg updateCmds )
 
         ( SettingsMsg subMsg, SettingsPage pageModel ) ->
             let
                 ( updatedPageModel, updateCmds ) =
-                    Settings.update subMsg pageModel
+                    Settings.update subMsg pageModel (getToken model.auth)
             in
             ( { model | page = SettingsPage updatedPageModel }, Cmd.map SettingsMsg updateCmds )
 
         ( _, _ ) ->
             ( model, Cmd.none )
+
+
+port turnOffMenu : (() -> msg) -> Sub msg
+
+
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    turnOffMenu (always TurnOffMenu)
 
 
 main : Program (Maybe Token) Model Msg
@@ -269,7 +364,7 @@ main =
         { init = init
         , view = view
         , update = update
-        , subscriptions = \_ -> Sub.none
+        , subscriptions = subscriptions
         , onUrlRequest = LinkClicked
         , onUrlChange = UrlChanged
         }

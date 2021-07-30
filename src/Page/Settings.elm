@@ -11,13 +11,14 @@ import Http
 import Json.Decode as Decode exposing (Decoder, string)
 import Json.Encode as Encode
 import MessageBanner as Message exposing (MessageBanner)
-import Page.Loading exposing (header)
+import Page.Loading
 import Profile exposing (Config)
 import RemoteData exposing (WebData)
 import Request
-import Route exposing (Route, Token)
+import Route exposing (Token)
 import Task
 import Timezone exposing (Timezone, timezonesDecoder)
+import Tweet as T
 
 
 type alias Model =
@@ -48,9 +49,9 @@ type Msg
     | StoreEmail String
     | StoreCurrentPassword String
     | StoreNewPassword String
-    | RequestConnectToken Token
-    | UpdateProfile Token
-    | UpdateAccount Token
+    | RequestConnectToken
+    | UpdateProfile
+    | UpdateAccount
 
 
 type View
@@ -76,16 +77,6 @@ init token =
     ( model, fetchTimezones token )
 
 
-encodeNullable : (value -> Encode.Value) -> Maybe value -> Encode.Value
-encodeNullable valueEncoder maybeValue =
-    case maybeValue of
-        Just value ->
-            valueEncoder value
-
-        Nothing ->
-            Encode.null
-
-
 accountEncoder : Model -> Encode.Value
 accountEncoder model =
     Encode.object
@@ -100,7 +91,7 @@ profileEncoder model =
     Encode.object
         [ ( "name", Encode.string model.name )
         , ( "timezone", Encode.int model.timezone )
-        , ( "avatar", encodeNullable Encode.string (Api.base64FromUrl model.avatar) )
+        , ( "avatar", T.encodeNullable Encode.string (Api.base64FromUrl model.avatar) )
         ]
 
 
@@ -202,8 +193,8 @@ viewTimezones ( timezones, currentTimezone ) =
             [ option [] [] ]
 
 
-accountSettingsView : Model -> Token -> Html Msg
-accountSettingsView model token =
+accountSettingsView : Model -> Html Msg
+accountSettingsView model =
     div [ class "account-settings" ]
         [ span [] [ text "Email" ]
         , input
@@ -235,8 +226,8 @@ accountSettingsView model token =
         ]
 
 
-profileSettingsView : Model -> Token -> Html Msg
-profileSettingsView model token =
+profileSettingsView : Model -> Html Msg
+profileSettingsView model =
     div [ class "profile-settings" ]
         [ div []
             [ span [] [ text "Name" ]
@@ -245,8 +236,8 @@ profileSettingsView model token =
             , viewTimezones ( model.timezones, model.timezone )
                 |> select [ onInput StoreTimezone ]
             , span [] [ text "Connect Twitter" ]
-            , button [ onClick (RequestConnectToken token) ] [ text "Click to connect" ]
-            , button [ onClick (UpdateProfile token) ] [ text "Upate profile" ]
+            , button [ onClick RequestConnectToken ] [ text "Click to connect" ]
+            , button [ onClick UpdateProfile ] [ text "Upate profile" ]
             ]
         , div [ class "avatar-settings-container" ]
             [ div [ class "avatar-container" ]
@@ -257,18 +248,18 @@ profileSettingsView model token =
         ]
 
 
-viewSettingsForms : Model -> Token -> Html Msg
-viewSettingsForms model token =
+viewSettingsForms : Model -> Html Msg
+viewSettingsForms model =
     case model.subView of
         AccountSettings ->
-            accountSettingsView model token
+            accountSettingsView model
 
         ProfileSettings ->
-            profileSettingsView model token
+            profileSettingsView model
 
 
-body : Model -> Token -> Html Msg
-body model token =
+body : Model -> Html Msg
+body model =
     case model.timezones of
         RemoteData.NotAsked ->
             Page.Loading.body
@@ -290,69 +281,17 @@ body model token =
                                 ]
                             ]
                         , div [ class "settings-board" ]
-                            [ viewSettingsForms model token ]
+                            [ viewSettingsForms model ]
                         ]
                     ]
                 ]
 
 
-viewMessage : MessageBanner -> Html Msg
-viewMessage message =
-    div
-        [ class "message"
-        , style "background"
-            (case message of
-                Just status ->
-                    case status of
-                        Message.Loading _ ->
-                            "#ffff8b"
-
-                        _ ->
-                            "red"
-
-                Nothing ->
-                    "white"
-            )
-        , style "color"
-            (case message of
-                Just (Message.Loading msg) ->
-                    "#0f0f0f"
-
-                Just (Message.Failure msg) ->
-                    "white"
-
-                Just _ ->
-                    "#0f0f0f"
-
-                Nothing ->
-                    "white"
-            )
-        ]
-        [ span []
-            [ text
-                (case message of
-                    Just (Message.Loading msg) ->
-                        msg
-
-                    Just (Message.Failure msg) ->
-                        msg
-
-                    Just _ ->
-                        ""
-
-                    Nothing ->
-                        ""
-                )
-            ]
-        ]
-
-
-view : Model -> Token -> Route -> WebData Config -> Html Msg
-view model token route config =
+view : Model -> WebData Config -> Html Msg
+view model config =
     div []
-        [ header route (Profile.getAvatar config)
-        , viewMessage model.message
-        , body model token
+        [ Message.viewMessage model.message
+        , body model
 
         {---
         , button
@@ -364,8 +303,8 @@ view model token route config =
         ]
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+update : Msg -> Model -> Token -> ( Model, Cmd Msg )
+update msg model token =
     case msg of
         PickAvatar ->
             ( model
@@ -377,8 +316,8 @@ update msg model =
 
         GotConnectToken response ->
             case response of
-                RemoteData.Success token ->
-                    ( model, String.concat [ "/api/connect/twitter?token=", token ] |> Nav.load )
+                RemoteData.Success token_ ->
+                    ( model, String.concat [ "/api/connect/twitter?token=", token_ ] |> Nav.load )
 
                 _ ->
                     ( model, Cmd.none )
@@ -442,22 +381,21 @@ update msg model =
         StoreNewPassword pw ->
             ( { model | newPassword = pw }, Cmd.none )
 
-        RequestConnectToken token ->
+        RequestConnectToken ->
             ( model, fetchConnectToken token )
 
-        UpdateProfile token ->
+        UpdateProfile ->
             ( { model
-                | message = Just (Message.Loading "Updating profile...")
+                | message = Just Message.Loading
               }
             , updateProfile model token
             )
 
-        UpdateAccount token ->
+        UpdateAccount ->
             ( model, updateProfile model token )
 
         GotUpdatedProfile result ->
             ( model, Message.fadeMessage FadeMessage )
 
         GotUpdatedAccount result ->
-            Debug.log (Debug.toString result)
-                ( model, Cmd.none )
+            ( model, Cmd.none )

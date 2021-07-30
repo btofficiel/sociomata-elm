@@ -18,7 +18,8 @@ type alias Token =
 type Route
     = Loading
     | Index
-    | CreatePostQuery Query
+    | CreatePost Query
+    | EditPost Int
     | Settings
     | NotFound
 
@@ -42,7 +43,8 @@ matchRoute : Parser (Route -> a) a
 matchRoute =
     oneOf
         [ map Index (s "app")
-        , map CreatePostQuery (s "app" </> s "create" <?> query)
+        , map CreatePost (s "app" </> s "create" <?> query)
+        , map EditPost (s "app" </> s "edit" </> int)
         , map Loading (s "app" </> s "loading")
         , map Settings (s "app" </> s "settings")
         ]
