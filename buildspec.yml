@@ -1,0 +1,25 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo Installing Node 14...
+      - curl -sL https://deb.nodesource.com/setup_14.x | bash -
+      - apt-get install -y nodejs
+      - npm install uglify-js -g
+      - curl -L -o elm.gz https://github.com/elm/compiler/releases/download/0.19.1/binary-for-linux-64-bit.gz
+      - gunzip elm.gz
+      - chmod +x elm
+      - mv elm /usr/local/bin/
+  pre_build:
+    commands:
+      - echo No-pre_build commands
+  build:
+    commands:
+      - echo Building Elm files...
+      - bash optimize.sh src/Main.elm
+artifacts:
+  files:
+    - "js/*"
+  base-directory: build
+  discard-paths: no
