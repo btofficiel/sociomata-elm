@@ -20,6 +20,6 @@ phases:
       - bash optimize.sh src/Main.elm
 artifacts:
   files:
-    - "js/*"
+    - "**/*"
   base-directory: build
   discard-paths: no
