@@ -18,6 +18,7 @@ phases:
     commands:
       - echo Building Elm files...
       - bash optimize.sh src/Main.elm
+      - rm -rf build/elm.js
 artifacts:
   files:
     - "**/*"
