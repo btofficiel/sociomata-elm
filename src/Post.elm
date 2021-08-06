@@ -1,4 +1,4 @@
-module Post exposing (DictPost, Post, PostId(..), compareById, postIdDecoder, postsQueueDecoder, pseudoPost, timestampToInt, twitterPostDecoder)
+module Post exposing (DictPost, Post, PostId(..), compareById, postIdDecoder, postIdToInt, postsQueueDecoder, pseudoPost, timestampToInt, twitterPostDecoder)
 
 import Dict exposing (Dict)
 import Json.Decode as Decode exposing (Decoder, bool, dict, int, list, nullable, string)

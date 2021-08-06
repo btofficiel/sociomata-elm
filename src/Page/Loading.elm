@@ -123,5 +123,6 @@ emptyState height message =
 loadingView : WebData Config -> Html msg
 loadingView config =
     div []
-        [ body
+        [ div [ class "message nothing" ] []
+        , body
         ]

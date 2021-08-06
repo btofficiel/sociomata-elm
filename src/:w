@@ -164,7 +164,7 @@ disconnectTwitter : Token -> Cmd Msg
 disconnectTwitter token =
     let
         decoder =
-            Decode.succeed ()
+            D.succeed ()
 
         url =
             "/api/connect/twitter"
@@ -369,11 +369,8 @@ update : Msg -> Model -> Token -> ( Model, Cmd Msg )
 update msg model token =
     case msg of
         DisconnectTwitter ->
-            ( { model
-                | message = Just Message.Loading
-              }
-            , disconnectTwitter token
-            )
+            ( model, disconnectTwitter token )
+
 
         ToggleDisconnectButton bool ->
             let
@@ -423,47 +420,6 @@ update msg model token =
 
                 _ ->
                     ( { model | timezones = response }, Cmd.none )
-
-        GotDeletedAccount (Ok _) ->
-            let
-                new_twitter =
-                    { connected = False
-                    , showDisconnectButon = False
-                    }
-            in
-            ( { model
-                | message = Just (Message.Success "Your twitter account has been disconnected")
-                , twitter = new_twitter
-              }
-            , Message.fadeMessage FadeMessage
-            )
-
-        GotDeletedAccount (Err error) ->
-            case error of
-                Http.BadBody err ->
-                    ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
-
-                Http.NetworkError ->
-                    let
-                        err =
-                            "Oops! Looks like there is some problem with your network."
-                    in
-                    ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
-
-                Http.BadStatus 401 ->
-                    ( model
-                    , Cmd.batch
-                        [ Api.deleteToken ()
-                        , Nav.load "/login"
-                        ]
-                    )
-
-                _ ->
-                    let
-                        err =
-                            "Oops! Something bad happened, please try reloading the app"
-                    in
-                    ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
 
         GotAvatar file ->
             case File.size file > 2097152 of

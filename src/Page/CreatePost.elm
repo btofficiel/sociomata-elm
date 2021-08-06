@@ -44,7 +44,7 @@ type ActionType
 
 
 type Msg
-    = CreatePost
+    = SendPostNow
     | RemoveTweet Int String
     | FadeMessage
     | EnterTweet Int String String
@@ -54,7 +54,6 @@ type Msg
     | AddToThread Int Time.Posix
     | SchedulePost Time.Posix
     | TrySchedulePost
-    | SendPostNow
     | GotCreatedPost ActionType (Result Http.Error ())
     | NoOp
 
@@ -257,7 +256,7 @@ update msg model offset token =
 
         GotCreatedPost PostNow (Ok _) ->
             ( { model
-                | message = Just (Message.Success "Yes! your tweets have posted")
+                | message = Just (Message.Success "Yes! your tweets have been posted")
               }
             , Message.fadeMessage FadeMessage
             )
@@ -459,9 +458,6 @@ update msg model offset token =
               }
             , cmd
             )
-
-        CreatePost ->
-            ( model, Cmd.none )
 
         NoOp ->
             ( model, Cmd.none )

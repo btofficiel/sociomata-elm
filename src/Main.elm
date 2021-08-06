@@ -154,6 +154,12 @@ initCurrentPage ( model, existingCmds ) =
                         ( updatedPageModel, updatePageCmds ) =
                             case model.config of
                                 RemoteData.Success config ->
+                                    let
+                                        twitter =
+                                            { connected = config.twitterConnected
+                                            , showDisconnectButon = False
+                                            }
+                                    in
                                     case config.profile of
                                         Just profile ->
                                             ( { pageModel
@@ -161,6 +167,7 @@ initCurrentPage ( model, existingCmds ) =
                                                 , timezone = profile.timezoneId
                                                 , avatar = profile.avatar
                                                 , email = config.email
+                                                , twitter = twitter
                                               }
                                             , pageCmds
                                             )
@@ -168,6 +175,7 @@ initCurrentPage ( model, existingCmds ) =
                                         Nothing ->
                                             ( { pageModel
                                                 | email = config.email
+                                                , twitter = twitter
                                               }
                                             , pageCmds
                                             )
@@ -344,7 +352,41 @@ update msg model =
                 ( updatedPageModel, updateCmds ) =
                     Settings.update subMsg pageModel (getToken model.auth)
             in
-            ( { model | page = SettingsPage updatedPageModel }, Cmd.map SettingsMsg updateCmds )
+            case subMsg of
+                Settings.GotUpdatedProfile response ->
+                    case response of
+                        RemoteData.Success config ->
+                            ( { model
+                                | page = SettingsPage updatedPageModel
+                                , config = response
+                              }
+                            , Cmd.map SettingsMsg updateCmds
+                            )
+
+                        _ ->
+                            ( { model | page = SettingsPage updatedPageModel }, Cmd.map SettingsMsg updateCmds )
+
+                Settings.GotDeletedAccount (Ok _) ->
+                    case model.config of
+                        RemoteData.Success config ->
+                            let
+                                new_config =
+                                    { config
+                                        | twitterConnected = False
+                                    }
+                            in
+                            ( { model
+                                | page = SettingsPage updatedPageModel
+                                , config = RemoteData.Success new_config
+                              }
+                            , Cmd.map SettingsMsg updateCmds
+                            )
+
+                        _ ->
+                            ( { model | page = SettingsPage updatedPageModel }, Cmd.map SettingsMsg updateCmds )
+
+                _ ->
+                    ( { model | page = SettingsPage updatedPageModel }, Cmd.map SettingsMsg updateCmds )
 
         ( _, _ ) ->
             ( model, Cmd.none )
@@ -354,8 +396,17 @@ port turnOffMenu : (() -> msg) -> Sub msg
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
-    turnOffMenu (always TurnOffMenu)
+subscriptions model =
+    Sub.batch
+        [ turnOffMenu (always TurnOffMenu)
+        , case model.page of
+            QueuePage _ ->
+                Queue.subscriptions
+                    |> Sub.map QueueMsg
+
+            _ ->
+                Sub.none
+        ]
 
 
 main : Program (Maybe Token) Model Msg

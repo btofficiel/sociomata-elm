@@ -136,7 +136,8 @@ posixToTime timestamp timezone =
             String.fromInt (convert24hTo12h hourIn24hFormat)
 
         minutes =
-            String.fromInt (toMinute timezone timestamp)
+            toMinute timezone timestamp
+                |> dateNumToString
 
         timePeriod =
             getTimePeriod hourIn24hFormat

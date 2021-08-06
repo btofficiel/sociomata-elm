@@ -1,4 +1,4 @@
-module Page.Queue exposing (Model, Msg, init, update, view)
+port module Page.Queue exposing (Model, Msg, init, subscriptions, update, view)
 
 import Api
 import Array
@@ -6,8 +6,9 @@ import Browser.Navigation as Nav
 import DateTime exposing (Offset, viewTime)
 import Dict
 import Html exposing (Html, button, div, h3, img, input, li, section, span, text, ul)
-import Html.Attributes exposing (class, src, style, type_)
+import Html.Attributes exposing (class, id, src, style, type_)
 import Html.Events exposing (onClick, onInput)
+import Html.Keyed
 import Http
 import Json.Decode as D exposing (Decoder)
 import MessageBanner as Message exposing (MessageBanner)
@@ -23,8 +24,14 @@ import Time exposing (Zone)
 type alias Model =
     { posts : WebData DictPost
     , baseTime : Int
-    , toggledPost : Maybe PostId
+    , toggledPost : ToggledPost
     , message : MessageBanner
+    }
+
+
+type alias ToggledPost =
+    { post : Maybe PostId
+    , askDeleteConfirmation : Bool
     }
 
 
@@ -36,7 +43,10 @@ type Msg
     | GenerateCurrentTime Time.Posix
     | TogglePostActions PostId
     | LoadPosts
-    | DeletePost PostId
+    | DeletePost String PostId
+    | GotDeletedPost ( String, Int ) (Result Http.Error ())
+    | PromptDeletePost
+    | TurnOffPostMenu
 
 
 fetchPosts : Token -> Maybe Int -> Cmd Msg
@@ -61,11 +71,34 @@ fetchPosts token ts =
         }
 
 
+deletePost : Token -> String -> Int -> Cmd Msg
+deletePost token day postId =
+    let
+        decoder =
+            D.succeed ()
+
+        url =
+            String.concat [ "/api/posts/", String.fromInt postId ]
+    in
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" token ]
+        , url = url
+        , body = Http.emptyBody
+        , expect = Request.expectJson (GotDeletedPost ( day, postId )) decoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
 init : Token -> ( Model, Cmd Msg )
 init token =
     ( { posts = RemoteData.Loading
       , baseTime = 0
-      , toggledPost = Nothing
+      , toggledPost =
+            { post = Nothing
+            , askDeleteConfirmation = False
+            }
       , message = Nothing
       }
     , Cmd.batch [ fetchPosts token Nothing, DateTime.getNewTime GenerateCurrentTime ]
@@ -115,11 +148,23 @@ viewNameOfDay timestamp todayTimestamp zone =
             "Someday"
 
 
-viewPost : Maybe PostId -> Zone -> Avatar -> Post -> Html Msg
-viewPost toggledPost timezone avatar post =
+viewPost : ToggledPost -> Zone -> Avatar -> String -> Post -> Html Msg
+viewPost toggledPost timezone avatar day post =
     let
         timestamp =
             timestampToInt post.timestamp
+
+        postIdString =
+            Post.postIdToInt post.id
+                |> String.fromInt
+
+        settingsIconId =
+            postIdString
+                |> (++) "settingsIcon"
+
+        postMenuId =
+            postIdString
+                |> (++) "postMenu"
     in
     li [ class "inqueue" ]
         [ img [ class "avatar", src (Page.Loading.getAvatarURL avatar) ] []
@@ -127,15 +172,17 @@ viewPost toggledPost timezone avatar post =
         , span [ class "content", onClick (OpenEditPost post.id) ] [ text post.description ]
         , span [ class "time" ] [ text (viewTime timestamp timezone) ]
         , img
-            [ class "settings-icon"
+            [ id settingsIconId
+            , class "settings-icon"
             , src "/images/settings.svg"
             , onClick (TogglePostActions post.id)
             ]
             []
         , span
-            [ class "post-menu"
+            [ id postMenuId
+            , class "post-menu"
             , style "display"
-                (case toggledPost of
+                (case toggledPost.post of
                     Just postId ->
                         case Post.compareById postId post.id of
                             True ->
@@ -148,11 +195,22 @@ viewPost toggledPost timezone avatar post =
                         "none"
                 )
             ]
-            [ ul [ class "settings-menu" ]
-                [ li [ onClick (OpenEditPost post.id) ] [ text "Edit post" ]
-                , li [ onClick (DeletePost post.id) ] [ text "Delete post" ]
-                ]
-            ]
+            (case toggledPost.askDeleteConfirmation of
+                True ->
+                    [ div [] [ text "Delete this post?" ]
+                    , ul [ class "settings-menu" ]
+                        [ li [ onClick (DeletePost day post.id) ] [ text "Yes" ]
+                        , li [ onClick TurnOffPostMenu ] [ text "No" ]
+                        ]
+                    ]
+
+                False ->
+                    [ ul [ class "settings-menu" ]
+                        [ li [ onClick (OpenEditPost post.id) ] [ text "Edit post" ]
+                        , li [ onClick PromptDeletePost ] [ text "Delete post" ]
+                        ]
+                    ]
+            )
         ]
 
 
@@ -164,25 +222,45 @@ viewAddToQueue _ =
         ]
 
 
-viewPostsForADay : Maybe PostId -> List Post -> Zone -> Avatar -> Html Msg
-viewPostsForADay toggledPost posts timezone avatar =
+viewPostsForADay : ToggledPost -> List Post -> Zone -> Avatar -> String -> Html Msg
+viewPostsForADay toggledPost posts timezone avatar day =
     if List.length posts >= 3 then
-        ul []
-            (List.map (viewPost toggledPost timezone avatar) posts)
+        List.map
+            (\post ->
+                ( Post.postIdToInt post.id
+                    |> String.fromInt
+                , viewPost toggledPost timezone avatar day post
+                )
+            )
+            posts
+            |> Html.Keyed.ul []
 
     else
-        ul []
-            (List.append
-                (List.map (viewPost toggledPost timezone avatar) posts)
-                (List.map viewAddToQueue (newListRange (3 - List.length posts)))
+        (List.map
+            (\post ->
+                ( Post.postIdToInt post.id
+                    |> String.fromInt
+                , viewPost toggledPost timezone avatar day post
+                )
             )
+            posts
+            ++ List.map
+                (\order ->
+                    ( day
+                        |> (++) (String.fromInt order)
+                    , viewAddToQueue order
+                    )
+                )
+                (newListRange (3 - List.length posts))
+        )
+            |> Html.Keyed.ul []
 
 
-viewDay : Maybe PostId -> Int -> Zone -> Avatar -> ( String, List Post ) -> Html Msg
+viewDay : ToggledPost -> Int -> Zone -> Avatar -> ( String, List Post ) -> Html Msg
 viewDay toggledPost baseTime timezone avatar ( timestamp, posts ) =
     div [ class "day" ]
         [ h3 [] [ text (viewNameOfDay timestamp baseTime timezone) ]
-        , viewPostsForADay toggledPost posts timezone avatar
+        , viewPostsForADay toggledPost posts timezone avatar timestamp
         ]
 
 
@@ -269,9 +347,46 @@ view model config =
         ]
 
 
+port setToggledPostIds : Int -> Cmd msg
+
+
+port turnOffPostMenu : (() -> msg) -> Sub msg
+
+
+subscriptions : Sub Msg
+subscriptions =
+    turnOffPostMenu (always TurnOffPostMenu)
+
+
 update : Msg -> Model -> Offset -> Token -> Nav.Key -> ( Model, Cmd Msg )
 update msg model offset token navKey =
     case msg of
+        PromptDeletePost ->
+            let
+                currentToggledPost =
+                    model.toggledPost
+
+                new_togglePost =
+                    { currentToggledPost
+                        | askDeleteConfirmation = True
+                    }
+            in
+            ( { model
+                | toggledPost = new_togglePost
+              }
+            , Cmd.none
+            )
+
+        TurnOffPostMenu ->
+            ( { model
+                | toggledPost =
+                    { post = Nothing
+                    , askDeleteConfirmation = False
+                    }
+              }
+            , Cmd.none
+            )
+
         OpenEditPost (Post.PostId postId) ->
             ( model, Nav.pushUrl navKey (String.concat [ "/app/edit/", String.fromInt postId ]) )
 
@@ -282,17 +397,45 @@ update msg model offset token navKey =
             ( { model | message = Nothing }, Cmd.none )
 
         TogglePostActions postId ->
-            case model.toggledPost of
+            case model.toggledPost.post of
                 Just pid ->
                     case Post.compareById pid postId of
                         True ->
-                            ( { model | toggledPost = Nothing }, Cmd.none )
+                            ( { model
+                                | toggledPost =
+                                    { post = Nothing
+                                    , askDeleteConfirmation = False
+                                    }
+                              }
+                            , Cmd.none
+                            )
 
                         False ->
-                            ( { model | toggledPost = Just postId }, Cmd.none )
+                            ( { model
+                                | toggledPost =
+                                    { post = Just postId
+                                    , askDeleteConfirmation = False
+                                    }
+                              }
+                            , setToggledPostIds (Post.postIdToInt postId)
+                            )
 
                 Nothing ->
-                    ( { model | toggledPost = Just postId }, Cmd.none )
+                    ( { model
+                        | toggledPost =
+                            { post = Just postId
+                            , askDeleteConfirmation = False
+                            }
+                      }
+                    , setToggledPostIds (Post.postIdToInt postId)
+                    )
+
+        DeletePost day (Post.PostId postId) ->
+            ( { model
+                | message = Just Message.Loading
+              }
+            , deletePost token day postId
+            )
 
         LoadPosts ->
             case model.posts of
@@ -320,6 +463,62 @@ update msg model offset token navKey =
 
                 _ ->
                     ( { model | message = Just (Message.Failure "Sorry, something happened from our end. Try reloading the app") }, Cmd.none )
+
+        GotDeletedPost ( day, postId ) (Ok _) ->
+            case model.posts of
+                RemoteData.Success postDict ->
+                    case Dict.get day postDict of
+                        Just posts ->
+                            let
+                                new_posts =
+                                    posts
+                                        |> List.filter (\p -> Post.compareById p.id (Post.PostId postId) == False)
+
+                                updater maybePost =
+                                    Just new_posts
+
+                                newDict =
+                                    Dict.update day updater postDict
+                            in
+                            ( { model
+                                | message = Just (Message.Success "Your post has been deleted")
+                                , posts = RemoteData.Success newDict
+                              }
+                            , Message.fadeMessage FadeMessage
+                            )
+
+                        Nothing ->
+                            ( model, Nav.reload )
+
+                _ ->
+                    ( model, Nav.reload )
+
+        GotDeletedPost _ (Err error) ->
+            case error of
+                Http.BadBody err ->
+                    ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
+                Http.NetworkError ->
+                    let
+                        err =
+                            "Oops! Looks like there is some problem with your network."
+                    in
+                    ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
+                Http.BadStatus 401 ->
+                    ( model
+                    , Cmd.batch
+                        [ Api.deleteToken ()
+                        , Nav.load "/login"
+                        ]
+                    )
+
+                _ ->
+                    let
+                        err =
+                            "Oops! Something bad happened, please try reloading the app"
+                    in
+                    ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
 
         GotPosts response ->
             case model.posts of
