@@ -22,4 +22,5 @@ artifacts:
   files:
     - "**/*"
   base-directory: build
+  name: js
   discard-paths: no
