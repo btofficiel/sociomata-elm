@@ -142,7 +142,7 @@ initCurrentPage ( model, existingCmds ) =
                 Route.CreatePost query ->
                     let
                         ( pageModel, pageCmds ) =
-                            CreatePost.init
+                            CreatePost.init query
                     in
                     ( CreatePostPage pageModel, Cmd.map CreatePostMsg pageCmds )
 

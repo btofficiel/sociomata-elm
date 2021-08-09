@@ -18,7 +18,7 @@ import Page.Loading
 import Profile exposing (Config)
 import RemoteData exposing (WebData)
 import Request
-import Route exposing (Token)
+import Route exposing (Query, Token)
 import Task
 import Time
 import Tuple
@@ -58,8 +58,8 @@ type Msg
     | NoOp
 
 
-init : ( Model, Cmd Msg )
-init =
+init : Query -> ( Model, Cmd Msg )
+init query =
     let
         tweet =
             { tweet = ""
@@ -68,7 +68,7 @@ init =
     in
     ( { tweets = [ tweet ]
       , message = Nothing
-      , timestamp = Nothing
+      , timestamp = query.timestamp
       }
     , DateTime.getNewTime GenerateDefaultTime
     )
@@ -348,15 +348,20 @@ update msg model offset token =
                     )
 
         GenerateDefaultTime posix ->
-            let
-                ts =
-                    toFloat (DateTime.posixToSeconds posix)
-                        / 60
-                        |> floor
-                        |> (*) 60
-                        |> (+) 3600
-            in
-            ( { model | timestamp = Just ts }, Cmd.none )
+            case model.timestamp of
+                Just _ ->
+                    ( model, Cmd.none )
+
+                Nothing ->
+                    let
+                        ts =
+                            toFloat (DateTime.posixToSeconds posix)
+                                / 60
+                                |> floor
+                                |> (*) 60
+                                |> (+) 3600
+                    in
+                    ( { model | timestamp = Just ts }, Cmd.none )
 
         EnterTime datetime ->
             let

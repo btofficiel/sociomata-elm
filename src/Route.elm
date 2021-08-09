@@ -6,8 +6,7 @@ import Url.Parser.Query as Q
 
 
 type alias Query =
-    { q : Maybe String
-    , ts : Maybe Int
+    { timestamp : Maybe Int
     }
 
 
@@ -26,7 +25,7 @@ type Route
 
 query : Q.Parser Query
 query =
-    Q.map2 Query (Q.string "q") (Q.int "ts")
+    Q.map Query (Q.int "timestamp")
 
 
 parseUrl : Url -> Route

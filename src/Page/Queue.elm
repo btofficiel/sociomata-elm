@@ -37,7 +37,7 @@ type alias ToggledPost =
 
 type Msg
     = GotPosts (WebData DictPost)
-    | OpenCreatePost
+    | OpenCreatePost (Maybe Int)
     | OpenEditPost PostId
     | FadeMessage
     | GenerateCurrentTime Time.Posix
@@ -214,9 +214,9 @@ viewPost toggledPost timezone avatar day post =
         ]
 
 
-viewAddToQueue : Int -> Html Msg
-viewAddToQueue _ =
-    li [ class "add-to-queue", onClick OpenCreatePost ]
+viewAddToQueue : String -> Int -> Html Msg
+viewAddToQueue day _ =
+    li [ class "add-to-queue", onClick (OpenCreatePost (String.toInt day)) ]
         [ img [ src "/images/add.svg" ] []
         , span [] [ text "Add a post to queue" ]
         ]
@@ -248,7 +248,7 @@ viewPostsForADay toggledPost posts timezone avatar day =
                 (\order ->
                     ( day
                         |> (++) (String.fromInt order)
-                    , viewAddToQueue order
+                    , viewAddToQueue day order
                     )
                 )
                 (newListRange (3 - List.length posts))
@@ -289,7 +289,7 @@ body model config =
                 [ section [ class "panels" ]
                     [ section [ class "subheader" ]
                         [ span [] [ text "Queue" ]
-                        , span [ onClick OpenCreatePost ] [ text "Create Post" ]
+                        , span [ onClick (OpenCreatePost Nothing) ] [ text "Create Post" ]
                         ]
                     , section [ class "one-panel" ]
                         [ div [ class "queue" ]
@@ -390,8 +390,28 @@ update msg model offset token navKey =
         OpenEditPost (Post.PostId postId) ->
             ( model, Nav.pushUrl navKey (String.concat [ "/app/edit/", String.fromInt postId ]) )
 
-        OpenCreatePost ->
+        OpenCreatePost Nothing ->
             ( model, Nav.pushUrl navKey "/app/create" )
+
+        OpenCreatePost (Just day) ->
+            case day == model.baseTime of
+                True ->
+                    let
+                        url =
+                            day
+                                |> (+) (86400 - 60)
+                                |> String.fromInt
+                                |> (++) "/app/create?timestamp="
+                    in
+                    ( model, Nav.pushUrl navKey url )
+
+                False ->
+                    let
+                        url =
+                            String.fromInt day
+                                |> (++) "/app/create?timestamp="
+                    in
+                    ( model, Nav.pushUrl navKey url )
 
         FadeMessage ->
             ( { model | message = Nothing }, Cmd.none )
