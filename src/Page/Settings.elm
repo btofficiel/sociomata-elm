@@ -389,7 +389,7 @@ update msg model token =
 
         PickAvatar ->
             ( model
-            , Select.file [ "image/*" ] GotAvatar
+            , Select.file [ "image/jpeg", "image/jpg", "image/png" ] GotAvatar
             )
 
         FadeMessage ->
@@ -466,16 +466,30 @@ update msg model token =
                     ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
 
         GotAvatar file ->
-            case File.size file > 2097152 of
+            let
+                isFileTypeAlllowed =
+                    [ "image/jpeg", "image/png", "image/jpg" ]
+                        |> List.member (File.mime file)
+            in
+            case isFileTypeAlllowed of
                 True ->
+                    case File.size file > 2097152 of
+                        True ->
+                            ( { model
+                                | message = Just (Message.Failure "Please upload an image which is under 2MB in size")
+                              }
+                            , Message.fadeMessage FadeMessage
+                            )
+
+                        False ->
+                            ( model, Task.perform GotAvatarURL (File.toUrl file) )
+
+                False ->
                     ( { model
-                        | message = Just (Message.Failure "Please upload an image which is under 2MB in size")
+                        | message = Just (Message.Failure "Please use a JPG or PNG file format for avatar")
                       }
                     , Message.fadeMessage FadeMessage
                     )
-
-                False ->
-                    ( model, Task.perform GotAvatarURL (File.toUrl file) )
 
         GotAvatarURL url ->
             ( { model | avatar = Just url }, Cmd.none )
