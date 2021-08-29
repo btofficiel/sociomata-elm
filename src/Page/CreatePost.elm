@@ -6,6 +6,8 @@ import Browser.Dom as Dom
 import Browser.Navigation as Nav
 import DateTime exposing (Offset)
 import Dict exposing (Dict)
+import File exposing (File)
+import File.Select as Select
 import Html exposing (Attribute, Html, button, div, img, input, li, section, span, text, textarea)
 import Html.Attributes exposing (class, id, placeholder, src, style, type_, value)
 import Html.Events exposing (on, onClick, onInput)
@@ -22,12 +24,13 @@ import Route exposing (Query, Token)
 import Task
 import Time
 import Tuple
-import Tweet exposing (tweetsEncoder)
+import Tweet exposing (Media, tweetsEncoder)
 
 
 type alias Tweet =
     { tweet : String
     , key : String
+    , media : List Media
     }
 
 
@@ -49,6 +52,10 @@ type Msg
     | FadeMessage
     | EnterTweet Int String String
     | EnterTime String
+    | PickMedia Int
+    | GotMedia Int File (List File)
+    | GotMediaURL Int (List String)
+    | RemoveMedia Int Int
     | GenerateDefaultTime Time.Posix
     | NewTweet Int
     | AddToThread Int Time.Posix
@@ -64,6 +71,7 @@ init query =
         tweet =
             { tweet = ""
             , key = "tweet#1"
+            , media = []
             }
     in
     ( { tweets = [ tweet ]
@@ -129,6 +137,18 @@ calculateTweetProgress tweetSize =
     width
 
 
+viewTwitterImage : Int -> ( Int, Media ) -> Html Msg
+viewTwitterImage tweet_order ( media_order, media ) =
+    div [ class "twitter-img-container" ]
+        [ img
+            [ class "twitter-media"
+            , src media.url
+            ]
+            []
+        , img [ class "close", src "/images/closeHover.png", onClick (RemoveMedia tweet_order media_order) ] []
+        ]
+
+
 viewEditor : ( Int, Tweet ) -> Html Msg
 viewEditor ( order, tweet ) =
     li []
@@ -142,8 +162,15 @@ viewEditor ( order, tweet ) =
                     ]
                     []
                 , img [ class "close", src "/images/closeHover.png", onClick (RemoveTweet order tweet.key) ] []
+                , div [ class "twitter-images" ]
+                    (List.indexedMap Tuple.pair tweet.media
+                        |> List.map (viewTwitterImage order)
+                    )
                 , div [ class "post-settings " ]
-                    [ span [ class "twitter-counter" ]
+                    [ span [ class "post-ctas" ]
+                        [ img [ src "/images/pickImage.png", onClick (PickMedia order) ] []
+                        ]
+                    , span [ class "twitter-counter" ]
                         [ span []
                             [ text
                                 (String.concat
@@ -247,6 +274,107 @@ view model config =
 update : Msg -> Model -> Offset -> Token -> ( Model, Cmd Msg )
 update msg model offset token =
     case msg of
+        PickMedia order ->
+            ( model
+            , Select.files [ "image/jpeg", "image/jpg", "image/png" ] (GotMedia order)
+            )
+
+        GotMedia tweet_order file files ->
+            let
+                isFileTypeAlllowed =
+                    [ "image/jpeg", "image/png", "image/jpg" ]
+                        |> List.member (File.mime file)
+
+                new_files =
+                    file :: files
+            in
+            case isFileTypeAlllowed of
+                True ->
+                    if List.length new_files <= 4 then
+                        ( model
+                        , List.map File.toUrl new_files
+                            |> Task.sequence
+                            |> Task.perform (GotMediaURL tweet_order)
+                        )
+
+                    else
+                        ( { model
+                            | message = Just (Message.Failure "Sorry! But you can only add upto 4 images in a tweet")
+                          }
+                        , Message.fadeMessage FadeMessage
+                        )
+
+                False ->
+                    ( { model
+                        | message = Just (Message.Failure "Please use a JPG or PNG file format for avatar")
+                      }
+                    , Message.fadeMessage FadeMessage
+                    )
+
+        GotMediaURL tweet_order files ->
+            let
+                map =
+                    \( order, tw ) ->
+                        if order == tweet_order then
+                            let
+                                media =
+                                    tw.media
+
+                                all_media =
+                                    media ++ List.map (\f -> { newlyAdded = True, url = f }) files
+
+                                list_size =
+                                    List.length all_media
+
+                                new_media =
+                                    if list_size > 4 then
+                                        List.drop (list_size - 4) all_media
+
+                                    else
+                                        all_media
+                            in
+                            { tw | media = new_media }
+
+                        else
+                            tw
+
+                new_list =
+                    List.indexedMap Tuple.pair model.tweets
+                        |> List.map map
+            in
+            ( { model
+                | tweets = new_list
+              }
+            , Cmd.none
+            )
+
+        RemoveMedia tweet_order media_order ->
+            let
+                map =
+                    \( order, tw ) ->
+                        if order == tweet_order then
+                            let
+                                filter =
+                                    \( morder, media ) -> morder /= media_order
+
+                                new_media =
+                                    List.indexedMap Tuple.pair tw.media
+                                        |> List.filter filter
+                                        |> List.map (\( morder, media ) -> media)
+                            in
+                            { tw | media = new_media }
+
+                        else
+                            tw
+
+                new_list =
+                    List.indexedMap Tuple.pair model.tweets
+                        |> List.map map
+            in
+            ( { model | tweets = new_list }
+            , Cmd.none
+            )
+
         GotCreatedPost Schedule (Ok _) ->
             ( { model
                 | message = Just (Message.Success "Yes! your post is scheduled")
@@ -400,6 +528,7 @@ update msg model offset token =
                     tweet =
                         { tweet = ""
                         , key = key
+                        , media = []
                         }
                 in
                 ( { model | tweets = [ tweet ] }
@@ -448,6 +577,7 @@ update msg model offset token =
                 tweet =
                     { tweet = ""
                     , key = String.concat [ "tweet", key ]
+                    , media = []
                     }
 
                 new_list =
