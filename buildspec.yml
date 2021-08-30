@@ -3,6 +3,8 @@ version: 0.2
 phases:
   install:
     commands:
+      - echo Installing UUID... 
+      - apt-get install uuid-runtime
       - echo Installing Node 14...
       - curl -sL https://deb.nodesource.com/setup_14.x | bash -
       - apt-get install -y nodejs
