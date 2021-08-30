@@ -4,7 +4,8 @@ phases:
   install:
     commands:
       - echo Installing UUID... 
-      - apt-get install uuid-runtime
+      - apt-get update -y
+      - apt-get install -y uuid-runtime
       - echo Installing Node 14...
       - curl -sL https://deb.nodesource.com/setup_14.x | bash -
       - apt-get install -y nodejs
