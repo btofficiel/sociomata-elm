@@ -23,9 +23,6 @@ phases:
       - bash codebuild.sh
       - rm -rf build/elm.js
       - bash delete_old.sh
-  post_build:
-    commands:
-      - bash post_build.sh
 artifacts:
   files:
     - "**/*"
