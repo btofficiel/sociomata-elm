@@ -287,9 +287,12 @@ update msg model offset token =
 
                 new_files =
                     file :: files
+
+                isFileSizeAllowed =
+                    File.size file <= 3670016
             in
-            case isFileTypeAlllowed of
-                True ->
+            case ( isFileTypeAlllowed, isFileSizeAllowed ) of
+                ( True, True ) ->
                     if List.length new_files <= 4 then
                         ( model
                         , List.map File.toUrl new_files
@@ -304,9 +307,16 @@ update msg model offset token =
                         , Message.fadeMessage FadeMessage
                         )
 
-                False ->
+                ( False, _ ) ->
                     ( { model
                         | message = Just (Message.Failure "Please use a JPG or PNG file format for avatar")
+                      }
+                    , Message.fadeMessage FadeMessage
+                    )
+
+                ( _, False ) ->
+                    ( { model
+                        | message = Just (Message.Failure "Please upload an image upto 3.5 MBs in size")
                       }
                     , Message.fadeMessage FadeMessage
                     )
