@@ -16,7 +16,7 @@ import Http
 import Iso8601
 import Json.Decode as D exposing (Decoder, at, field, int, map2, string)
 import MessageBanner as Message exposing (MessageBanner)
-import Page.CreatePost exposing (resetTextArea, resizeTextArea)
+import Page.CreatePost exposing (FileTuple, fileToTuple, resetTextArea, resizeTextArea)
 import Page.Loading
 import Post exposing (Post, twitterPostDecoder)
 import Profile exposing (Config)
@@ -26,7 +26,7 @@ import Route exposing (Token)
 import Task
 import Time
 import Tuple
-import Tweet exposing (Media, tweetsEncoder)
+import Tweet exposing (Media, TwitterMediaKey, tweetsEncoder)
 
 
 type alias Tweet =
@@ -40,6 +40,7 @@ type alias Model =
     { tweets : List Tweet
     , message : MessageBanner
     , timestamp : Maybe Int
+    , fileBatches : Dict Int (List File)
     , postId : Int
     , post : WebData Post
     , toggleMenu : Bool
@@ -54,7 +55,7 @@ type Msg
     | EnterTime String
     | PickMedia Int
     | GotMedia Int File (List File)
-    | GotMediaURL Int (List String)
+    | GotMediaURL Int (List FileTuple)
     | RemoveMedia Int Int
     | GenerateDefaultTime Time.Posix
     | NewTweet Int
@@ -96,6 +97,7 @@ init postId token =
     ( { tweets = [ tweet ]
       , message = Nothing
       , timestamp = Nothing
+      , fileBatches = Dict.empty
       , postId = postId
       , post = RemoteData.Loading
       , toggleMenu = False
@@ -322,7 +324,7 @@ update msg model offset token =
                 ( True, True ) ->
                     if List.length new_files <= 4 then
                         ( model
-                        , List.map File.toUrl new_files
+                        , List.map fileToTuple new_files
                             |> Task.sequence
                             |> Task.perform (GotMediaURL tweet_order)
                         )
@@ -358,7 +360,16 @@ update msg model offset token =
                                     tw.media
 
                                 all_media =
-                                    media ++ List.map (\f -> { newlyAdded = True, url = f }) files
+                                    media
+                                        ++ List.map
+                                            (\( file, url ) ->
+                                                { newlyAdded = True
+                                                , url = url
+                                                , imageKey = ""
+                                                , file = Just file
+                                                }
+                                            )
+                                            files
 
                                 list_size =
                                     List.length all_media
