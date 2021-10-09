@@ -435,9 +435,9 @@ update msg model offset token =
                     , Cmd.none
                     )
 
-                Err err ->
+                Err _ ->
                     ( { model
-                        | message = Just (Message.Failure (Debug.toString err))
+                        | message = Just (Message.Failure "Change here")
                       }
                     , Cmd.none
                     )
