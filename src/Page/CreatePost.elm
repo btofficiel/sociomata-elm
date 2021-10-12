@@ -1,4 +1,4 @@
-port module Page.CreatePost exposing (FileTuple, Model, Msg, Tweet, fileToTuple, init, resetTextArea, resizeTextArea, update, view)
+port module Page.CreatePost exposing (FileBatch, FileTuple, Model, Msg, Tweet, buildBatch, fileToTuple, init, resetTextArea, resizeTextArea, update, uploadMediaTask, view)
 
 import Api
 import Array
@@ -73,9 +73,7 @@ type alias FileTuple =
 
 type Msg
     = SendPostNow
-    | SendFileBatch Int
-    | GetMediaKeys (Result Http.Error (List PresignedURL))
-    | Uploaded (Result Http.Error ())
+    | GetMediaKeys ActionType (Result Http.Error (List PresignedURL))
     | RemoveTweet Int String
     | FadeMessage
     | EnterTweet Int String String
@@ -88,7 +86,6 @@ type Msg
     | NewTweet Int
     | AddToThread Int Time.Posix
     | SchedulePost Time.Posix
-    | SendPost
     | TrySchedulePost
     | GotCreatedPost ActionType (Result Http.Error ())
     | NoOp
@@ -110,6 +107,32 @@ init query =
       }
     , DateTime.getNewTime GenerateDefaultTime
     )
+
+
+buildBatch : List Tweet -> List FileBatch
+buildBatch tweets =
+    tweets
+        |> List.indexedMap
+            (\o t ->
+                t.media
+                    |> List.indexedMap
+                        (\to m ->
+                            { newlyAdded = m.newlyAdded
+                            , tweetOrder = o + 1
+                            , mediaOrder = to + 1
+                            , key = m.imageKey
+                            , file = m.file
+                            , mime =
+                                case m.file of
+                                    Just file ->
+                                        File.mime file
+
+                                    Nothing ->
+                                        ""
+                            }
+                        )
+            )
+        |> List.concat
 
 
 uploadMediaTask : Token -> FileBatch -> Task Http.Error PresignedURL
@@ -182,45 +205,7 @@ uploadMedia file response =
             Task.succeed ()
 
 
-buildFileBatchBody : List (Maybe File) -> List Part
-buildFileBatchBody batch =
-    let
-        mapFn x =
-            case x of
-                Just file ->
-                    [ filePart "images" file ]
-
-                Nothing ->
-                    []
-    in
-    List.map mapFn batch
-        |> List.concat
-
-
-uploadFileBatch : Int -> List (Maybe File) -> Token -> Cmd Msg
-uploadFileBatch tweet_order batch token =
-    case List.length batch > 0 of
-        True ->
-            let
-                decoder =
-                    D.succeed ()
-            in
-            Http.request
-                { method = "POST"
-                , headers = [ Http.header "Authorization" token ]
-                , url = "/api/upload/tweets"
-                , body = Http.multipartBody (buildFileBatchBody batch)
-                , expect = Request.expectJson (GotCreatedPost Schedule) decoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        False ->
-            Time.now
-                |> Task.perform (\_ -> SendFileBatch (tweet_order + 1))
-
-
-schedulePost : { tweets : List Tweet, timestamp : Maybe Int } -> Token -> Cmd Msg
+schedulePost : { tweets : List Tweet, timestamp : Maybe Int, media : List PresignedURL } -> Token -> Cmd Msg
 schedulePost model token =
     let
         decoder =
@@ -237,7 +222,7 @@ schedulePost model token =
         }
 
 
-postNow : { tweets : List Tweet, timestamp : Maybe Int } -> Token -> Cmd Msg
+postNow : { tweets : List Tweet, timestamp : Maybe Int, media : List PresignedURL } -> Token -> Cmd Msg
 postNow model token =
     let
         decoder =
@@ -418,29 +403,54 @@ fileToTuple file =
 update : Msg -> Model -> Offset -> Token -> ( Model, Cmd Msg )
 update msg model offset token =
     case msg of
-        Uploaded result ->
-            case result of
-                Ok _ ->
-                    ( model, Cmd.none )
-
-                Err _ ->
-                    ( model, Cmd.none )
-
-        GetMediaKeys result ->
+        GetMediaKeys postType result ->
             case result of
                 Ok media ->
-                    ( { model
-                        | message = Just (Message.Success "All files uploaded")
-                      }
-                    , Cmd.none
+                    let
+                        payload =
+                            { tweets = model.tweets
+                            , timestamp = model.timestamp
+                            , media = media
+                            }
+
+                        cmd =
+                            case postType of
+                                Schedule ->
+                                    schedulePost payload token
+
+                                PostNow ->
+                                    postNow payload token
+                    in
+                    ( model
+                    , cmd
                     )
 
-                Err _ ->
-                    ( { model
-                        | message = Just (Message.Failure "Change here")
-                      }
-                    , Cmd.none
-                    )
+                Err error ->
+                    case error of
+                        Http.BadBody err ->
+                            ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
+                        Http.NetworkError ->
+                            let
+                                err =
+                                    "Oops! Looks like there is some problem with your network."
+                            in
+                            ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
+                        Http.BadStatus 401 ->
+                            ( model
+                            , Cmd.batch
+                                [ Api.deleteToken ()
+                                , Nav.load "/login"
+                                ]
+                            )
+
+                        _ ->
+                            let
+                                err =
+                                    "Oops! Something bad happened, please try reloading the app"
+                            in
+                            ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
 
         PickMedia order ->
             ( model
@@ -610,48 +620,21 @@ update msg model offset token =
 
         SendPostNow ->
             let
-                payload =
-                    { tweets = model.tweets
-                    , timestamp = model.timestamp
-                    }
+                batch =
+                    buildBatch model.tweets
             in
             ( { model
                 | message = Just Message.Loading
               }
-            , postNow payload token
+            , List.map (uploadMediaTask token) batch
+                |> Task.sequence
+                |> Task.attempt (GetMediaKeys PostNow)
             )
-
-        SendPost ->
-            ( model, Cmd.none )
-
-        SendFileBatch _ ->
-            ( model, Cmd.none )
 
         TrySchedulePost ->
             let
                 batch =
-                    model.tweets
-                        |> List.indexedMap
-                            (\o t ->
-                                t.media
-                                    |> List.indexedMap
-                                        (\to m ->
-                                            { newlyAdded = m.newlyAdded
-                                            , tweetOrder = o + 1
-                                            , mediaOrder = to + 1
-                                            , key = m.imageKey
-                                            , file = m.file
-                                            , mime =
-                                                case m.file of
-                                                    Just file ->
-                                                        File.mime file
-
-                                                    Nothing ->
-                                                        ""
-                                            }
-                                        )
-                            )
-                        |> List.concat
+                    buildBatch model.tweets
             in
             ( { model
                 | fileBatch = batch
@@ -679,7 +662,7 @@ update msg model offset token =
                               }
                             , List.map (uploadMediaTask token) model.fileBatch
                                 |> Task.sequence
-                                |> Task.attempt GetMediaKeys
+                                |> Task.attempt (GetMediaKeys Schedule)
                             )
 
                         False ->

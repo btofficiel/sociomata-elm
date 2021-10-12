@@ -106,18 +106,20 @@ tweetsDecoder =
     list tweetDecoder
 
 
-mediaEncoder : Media -> Encode.Value
+mediaEncoder : PresignedURL -> Encode.Value
 mediaEncoder media =
     Encode.object
         [ ( "newly_added", Encode.bool media.newlyAdded )
-        , ( "url"
+        , ( "tweet_order", Encode.int media.tweetOrder )
+        , ( "media_order", Encode.int media.mediaOrder )
+        , ( "key"
           , Encode.string
                 (case media.newlyAdded of
                     True ->
-                        Maybe.withDefault "" (Api.base64FromUrl (Just media.url))
+                        media.fields.key
 
                     False ->
-                        media.url
+                        media.key
                 )
           )
         ]
@@ -161,7 +163,6 @@ tweetEncoder tweet =
     Encode.object
         [ ( "tweet", Encode.string tweet.tweet )
         , ( "tweet_order", Encode.int tweet.tweetOrder )
-        , ( "media", Encode.list mediaEncoder tweet.media )
         ]
 
 
@@ -185,6 +186,7 @@ toEncodedTweets tweets =
 
 tweetsEncoder :
     { timestamp : Maybe Int
+    , media : List PresignedURL
     , tweets :
         List
             { tweet : String
@@ -199,4 +201,5 @@ tweetsEncoder model =
         , ( "category_id", Encode.null )
         , ( "timestamp", encodeNullable Encode.int model.timestamp )
         , ( "tweets", Encode.list tweetEncoder (toEncodedTweets model.tweets) )
+        , ( "media", Encode.list mediaEncoder model.media )
         ]
