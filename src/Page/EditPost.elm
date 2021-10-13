@@ -16,7 +16,7 @@ import Http
 import Iso8601
 import Json.Decode as D exposing (Decoder, at, field, int, map2, string)
 import MessageBanner as Message exposing (MessageBanner)
-import Page.CreatePost exposing (resetTextArea, resizeTextArea)
+import Page.CreatePost exposing (FileBatch, FileTuple, buildBatch, fileToTuple, resetTextArea, resizeTextArea, uploadMediaTask)
 import Page.Loading
 import Post exposing (Post, twitterPostDecoder)
 import Profile exposing (Config)
@@ -26,7 +26,13 @@ import Route exposing (Token)
 import Task
 import Time
 import Tuple
-import Tweet exposing (Media, tweetsEncoder)
+import Tweet
+    exposing
+        ( Media
+        , PresignedURL
+        , TwitterMediaKey
+        , tweetsEncoder
+        )
 
 
 type alias Tweet =
@@ -40,6 +46,7 @@ type alias Model =
     { tweets : List Tweet
     , message : MessageBanner
     , timestamp : Maybe Int
+    , fileBatch : List FileBatch
     , postId : Int
     , post : WebData Post
     , toggleMenu : Bool
@@ -54,7 +61,8 @@ type Msg
     | EnterTime String
     | PickMedia Int
     | GotMedia Int File (List File)
-    | GotMediaURL Int (List String)
+    | GetMediaKeys (Result Http.Error (List PresignedURL))
+    | GotMediaURL Int (List FileTuple)
     | RemoveMedia Int Int
     | GenerateDefaultTime Time.Posix
     | NewTweet Int
@@ -96,6 +104,7 @@ init postId token =
     ( { tweets = [ tweet ]
       , message = Nothing
       , timestamp = Nothing
+      , fileBatch = []
       , postId = postId
       , post = RemoteData.Loading
       , toggleMenu = False
@@ -104,7 +113,7 @@ init postId token =
     )
 
 
-schedulePost : Int -> { tweets : List Tweet, timestamp : Maybe Int } -> Token -> Cmd Msg
+schedulePost : Int -> { tweets : List Tweet, timestamp : Maybe Int, media : List PresignedURL } -> Token -> Cmd Msg
 schedulePost postId model token =
     let
         decoder =
@@ -301,6 +310,45 @@ view model config =
 update : Msg -> Model -> Offset -> Token -> ( Model, Cmd Msg )
 update msg model offset token =
     case msg of
+        GetMediaKeys result ->
+            case result of
+                Ok media ->
+                    let
+                        payload =
+                            { tweets = model.tweets
+                            , timestamp = model.timestamp
+                            , media = media
+                            }
+                    in
+                    ( model, schedulePost model.postId payload token )
+
+                Err error ->
+                    case error of
+                        Http.BadBody err ->
+                            ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
+                        Http.NetworkError ->
+                            let
+                                err =
+                                    "Oops! Looks like there is some problem with your network."
+                            in
+                            ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
+                        Http.BadStatus 401 ->
+                            ( model
+                            , Cmd.batch
+                                [ Api.deleteToken ()
+                                , Nav.load "/login"
+                                ]
+                            )
+
+                        _ ->
+                            let
+                                err =
+                                    "Oops! Something bad happened, please try reloading the app"
+                            in
+                            ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
         PickMedia order ->
             ( model
             , Select.files [ "image/jpeg", "image/jpg", "image/png" ] (GotMedia order)
@@ -322,7 +370,7 @@ update msg model offset token =
                 ( True, True ) ->
                     if List.length new_files <= 4 then
                         ( model
-                        , List.map File.toUrl new_files
+                        , List.map fileToTuple new_files
                             |> Task.sequence
                             |> Task.perform (GotMediaURL tweet_order)
                         )
@@ -358,7 +406,16 @@ update msg model offset token =
                                     tw.media
 
                                 all_media =
-                                    media ++ List.map (\f -> { newlyAdded = True, url = f }) files
+                                    media
+                                        ++ List.map
+                                            (\( file, url ) ->
+                                                { newlyAdded = True
+                                                , url = url
+                                                , imageKey = ""
+                                                , file = Just file
+                                                }
+                                            )
+                                            files
 
                                 list_size =
                                     List.length all_media
@@ -487,7 +544,15 @@ update msg model offset token =
             ( { model | message = Nothing }, Cmd.none )
 
         TrySchedulePost ->
-            ( model, DateTime.getNewTime SchedulePost )
+            let
+                batch =
+                    buildBatch model.tweets
+            in
+            ( { model
+                | fileBatch = batch
+              }
+            , DateTime.getNewTime SchedulePost
+            )
 
         SchedulePost posix ->
             case model.timestamp of
@@ -512,7 +577,9 @@ update msg model offset token =
                             ( { model
                                 | message = Just Message.Loading
                               }
-                            , schedulePost model.postId payload token
+                            , List.map (uploadMediaTask token) model.fileBatch
+                                |> Task.sequence
+                                |> Task.attempt GetMediaKeys
                             )
 
                         False ->
