@@ -9,7 +9,7 @@ import Dict exposing (Dict)
 import File exposing (File)
 import File.Select as Select
 import Html exposing (Attribute, Html, button, div, img, input, li, section, span, text, textarea)
-import Html.Attributes exposing (class, id, placeholder, src, style, type_, value)
+import Html.Attributes as Attrs exposing (class, id, placeholder, src, style, type_, value)
 import Html.Events exposing (on, onClick, onInput)
 import Html.Keyed
 import Http exposing (Part, filePart, stringPart)
@@ -281,6 +281,9 @@ viewEditor ( order, tweet ) =
                     [ placeholder "Write your tweet"
                     , value tweet.tweet
                     , id tweet.key
+                    , Attrs.attribute "data-gramm" "false"
+                    , Attrs.attribute "data-gramm_editor" "false"
+                    , Attrs.attribute "data-enable-grammarly" "false"
                     , onInput (EnterTweet order tweet.key)
                     ]
                     []
