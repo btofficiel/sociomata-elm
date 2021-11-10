@@ -592,12 +592,31 @@ update msg model offset token navKey =
 
         GenerateCurrentTime currentTime ->
             let
+                currentTs =
+                    DateTime.posixToSeconds currentTime
+
                 ts =
-                    (toFloat (DateTime.posixToSeconds currentTime)
+                    (toFloat currentTs
                         / 86400
                         |> floor
                         |> (*) 86400
                     )
                         - (offset * 60)
+
+                adjustedTs =
+                    case offset < 0 of
+                        True ->
+                            ts - 86400
+
+                        False ->
+                            ts + 86400
+
+                finalTs =
+                    case currentTs - ts >= 86400 of
+                        True ->
+                            adjustedTs
+
+                        False ->
+                            ts
             in
-            ( { model | baseTime = ts }, Cmd.none )
+            ( { model | baseTime = finalTs }, Cmd.none )
