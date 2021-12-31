@@ -1,4 +1,4 @@
-module Page.Loading exposing (body, emptyState, getAvatarURL, header, loadingView)
+module Page.Loading exposing (body, emptyState, getAvatarURL, header, loadingView, redirection)
 
 import Html exposing (Attribute, Html, a, div, img, li, section, span, text, ul)
 import Html.Attributes exposing (class, href, id, src, style)
@@ -103,6 +103,19 @@ body =
     div [ class "loading-container" ]
         [ div [ style "display" "flex", style "flex-direction" "column", style "align-items" "center", style "row-gap" "30px", style "font-family" "'Work Sans', sans-serif" ]
             [ img [ src "/images/logo_gray.png", style "width" "12rem", style "justify-content" "center" ] []
+            , div [ class "progress-bar" ]
+                [ div [ class "progress-bar-value" ] []
+                ]
+            ]
+        ]
+
+
+redirection : Int -> String -> Html msg
+redirection height message =
+    div [ class "loading-container", style "height" (String.fromInt height ++ "vh") ]
+        [ div [ style "display" "flex", style "flex-direction" "column", style "align-items" "center", style "row-gap" "30px", style "font-family" "'Work Sans', sans-serif" ]
+            [ img [ src "/images/logo_gray.png", style "width" "12rem", style "justify-content" "center" ] []
+            , span [] [ text message ]
             , div [ class "progress-bar" ]
                 [ div [ class "progress-bar-value" ] []
                 ]

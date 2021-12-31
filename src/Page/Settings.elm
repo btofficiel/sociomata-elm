@@ -2,9 +2,10 @@ module Page.Settings exposing (Model, Msg(..), init, update, view)
 
 import Api
 import Browser.Navigation as Nav
+import DateTime
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, button, div, img, input, li, option, section, select, span, text, ul)
+import Html exposing (Html, button, div, img, input, li, option, section, select, span, table, td, text, th, tr, ul)
 import Html.Attributes exposing (class, placeholder, selected, src, style, type_, value)
 import Html.Events exposing (onClick, onInput, onMouseOut, onMouseOver)
 import Http
@@ -12,11 +13,13 @@ import Json.Decode as Decode exposing (Decoder, string)
 import Json.Encode as Encode
 import MessageBanner as Message exposing (MessageBanner)
 import Page.Loading
+import Payments exposing (Transaction, transactionsDecoder)
 import Profile exposing (Config, configDecoder)
 import RemoteData exposing (WebData)
 import Request
 import Route exposing (Token)
 import Task
+import Time
 import Timezone exposing (Timezone, timezonesDecoder)
 import Tweet as T
 
@@ -30,6 +33,7 @@ type alias Model =
     , message : MessageBanner
     , subView : View
     , timezones : WebData (List Timezone)
+    , transactions : WebData (List Transaction)
     , avatar : Maybe String
     , twitter : AccountConnection
     }
@@ -46,6 +50,7 @@ type Msg
     | FadeMessage
     | GotAvatar File
     | GotTimezones (WebData (List Timezone))
+    | GotTransactions (WebData (List Transaction))
     | GotConnectToken (WebData String)
     | GotAvatarURL String
     | GotUpdatedProfile (WebData Config)
@@ -67,6 +72,7 @@ type Msg
 type View
     = AccountSettings
     | ProfileSettings
+    | PaymentSettings
 
 
 init : Token -> ( Model, Cmd Msg )
@@ -81,6 +87,7 @@ init token =
             , message = Nothing
             , subView = ProfileSettings
             , timezones = RemoteData.Loading
+            , transactions = RemoteData.Loading
             , avatar = Nothing
             , twitter =
                 { connected = False
@@ -88,7 +95,7 @@ init token =
                 }
             }
     in
-    ( model, fetchTimezones token )
+    ( model, Cmd.batch [ fetchTimezones token, fetchTransactions token ] )
 
 
 accountEncoder : Model -> Encode.Value
@@ -130,6 +137,19 @@ updateProfile model token =
         , url = "/api/profile"
         , body = Http.jsonBody (profileEncoder model)
         , expect = Request.expectJson (RemoteData.fromResult >> GotUpdatedProfile) configDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+fetchTransactions : Token -> Cmd Msg
+fetchTransactions token =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" token ]
+        , url = "/api/transactions"
+        , body = Http.emptyBody
+        , expect = Request.expectJson (RemoteData.fromResult >> GotTransactions) transactionsDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -206,6 +226,12 @@ settingsMenu subview =
             , onClick (ChangeSubView ProfileSettings)
             ]
             [ text "Profile settings" ]
+        , li
+            [ changeSettingsMenuClass subview PaymentSettings
+                |> class
+            , onClick (ChangeSubView PaymentSettings)
+            ]
+            [ text "Payment settings" ]
         ]
 
 
@@ -310,6 +336,90 @@ profileSettingsView model =
         ]
 
 
+paymentSettingsView : Model -> Html Msg
+paymentSettingsView model =
+    case model.transactions of
+        RemoteData.Success transactions ->
+            div [ class "payment-settings" ]
+                [ div [ class "heading" ] [ text "Transactions" ]
+                , div [ class "heading" ] [ text "Current Plan" ]
+                , table []
+                    ([ tr []
+                        [ th [] [ text "Amount" ]
+                        , th [] [ text "Date" ]
+                        , th [] [ text "Card" ]
+                        , th [] [ text "Status" ]
+                        ]
+                     ]
+                        ++ List.map
+                            (\t ->
+                                tr []
+                                    [ td []
+                                        [ text
+                                            ((case t.currency of
+                                                "usd" ->
+                                                    "$"
+
+                                                _ ->
+                                                    "₹"
+                                             )
+                                                ++ String.fromInt t.amount
+                                            )
+                                        ]
+                                    , td []
+                                        [ text
+                                            (DateTime.posixToDate (DateTime.secondsToPosix t.date) "0" (Time.customZone model.timezone []))
+                                        ]
+                                    , td [] [ text (t.cardBrand ++ " " ++ t.cardLast4) ]
+                                    , td []
+                                        [ text
+                                            (case t.paid of
+                                                True ->
+                                                    "Paid"
+
+                                                False ->
+                                                    "Failed"
+                                            )
+                                        ]
+                                    ]
+                            )
+                            transactions
+                    )
+                , span [] [ div [ class "plan" ] [ text "Creator Plan" ] ]
+                ]
+
+        RemoteData.NotAsked ->
+            Page.Loading.body
+
+        RemoteData.Loading ->
+            Page.Loading.body
+
+        RemoteData.Failure (Http.BadBody err) ->
+            Page.Loading.emptyState 80 err
+
+        RemoteData.Failure Http.NetworkError ->
+            Page.Loading.emptyState 80 "Oops! Looks like there is some problem with your network."
+
+        _ ->
+            Page.Loading.emptyState 80 "Oops! This looks like an unknown error. Contact support"
+
+
+
+{--
+    div [ class "payment-settings" ]
+        [ table []
+            [ tr []
+                [ th [] [ text "Amount" ]
+                , th [] [ text "Date" ]
+                , th [] [ text "Card" ]
+                , th [] [ text "Status" ]
+                ]
+            ]
+        , div [ class "plan" ] []
+        ]
+    --}
+
+
 viewSettingsForms : Model -> Html Msg
 viewSettingsForms model =
     case model.subView of
@@ -318,6 +428,9 @@ viewSettingsForms model =
 
         ProfileSettings ->
             profileSettingsView model
+
+        PaymentSettings ->
+            paymentSettingsView model
 
 
 body : Model -> Html Msg
@@ -423,6 +536,27 @@ update msg model token =
 
                 _ ->
                     ( { model | timezones = response }, Cmd.none )
+
+        GotTransactions response ->
+            case response of
+                RemoteData.Success _ ->
+                    ( { model | transactions = response }, Cmd.none )
+
+                RemoteData.Failure err ->
+                    case err of
+                        Http.BadStatus 401 ->
+                            ( model
+                            , Cmd.batch
+                                [ Api.deleteToken ()
+                                , Nav.load "/login"
+                                ]
+                            )
+
+                        _ ->
+                            ( { model | transactions = response }, Cmd.none )
+
+                _ ->
+                    ( { model | transactions = response }, Cmd.none )
 
         GotDeletedAccount (Ok _) ->
             let

@@ -10,6 +10,7 @@ import Http
 import Page.CreatePost as CreatePost
 import Page.EditPost as EditPost
 import Page.Loading as Loading
+import Page.Onboarding as Onboarding
 import Page.Queue as Queue
 import Page.Settings as Settings
 import Process
@@ -41,6 +42,9 @@ type AuthenticationStatus
 type Page
     = NotFoundPage
     | LoadingPage
+    | PaymentSuccessPage
+    | PaymentFailedPage
+    | OnboardingPage Onboarding.Model
     | QueuePage Queue.Model
     | CreatePostPage CreatePost.Model
     | EditPostPage EditPost.Model
@@ -49,7 +53,9 @@ type Page
 
 type Msg
     = LinkClicked UrlRequest
+    | Redirect String
     | QueueMsg Queue.Msg
+    | OnboardingMsg Onboarding.Msg
     | CreatePostMsg CreatePost.Msg
     | EditPostMsg EditPost.Msg
     | SettingsMsg Settings.Msg
@@ -124,6 +130,25 @@ initCurrentPage ( model, existingCmds ) =
 
                 Route.NotFound ->
                     ( LoadingPage, Cmd.none )
+
+                Route.PaymentSucceeded ->
+                    ( PaymentSuccessPage
+                    , Process.sleep 5000
+                        |> Task.perform (\_ -> Redirect "/app")
+                    )
+
+                Route.PaymentFailed ->
+                    ( PaymentFailedPage
+                    , Process.sleep 5000
+                        |> Task.perform (\_ -> Redirect "/app/onboarding")
+                    )
+
+                Route.Onboarding ->
+                    let
+                        ( pageModel, pageCmds ) =
+                            Onboarding.init
+                    in
+                    ( OnboardingPage pageModel, Cmd.map OnboardingMsg pageCmds )
 
                 Route.Index ->
                     let
@@ -208,6 +233,15 @@ currentTitle route =
         Route.Loading ->
             "Loading..."
 
+        Route.PaymentSucceeded ->
+            "Payment successful..."
+
+        Route.PaymentFailed ->
+            "Payment failed"
+
+        Route.Onboarding ->
+            "Select a plan - Sociomata"
+
         Route.CreatePost query ->
             "Create Post - Sociomata"
 
@@ -232,8 +266,20 @@ currentView model =
             LoadingPage ->
                 Loading.loadingView model.config
 
+            PaymentSuccessPage ->
+                "Your payment has been successful, we're taking you back to the app"
+                    |> Loading.redirection 80
+
+            PaymentFailedPage ->
+                "Your payment failed, we're taking you back to the payment page"
+                    |> Loading.redirection 80
+
             NotFoundPage ->
-                Loading.loadingView model.config
+                Loading.emptyState 80 "Page not found"
+
+            OnboardingPage pageModel ->
+                Onboarding.view pageModel
+                    |> Html.map OnboardingMsg
 
             EditPostPage pageModel ->
                 EditPost.view pageModel model.config
@@ -272,6 +318,48 @@ update msg model =
                         , Nav.load "/login"
                         ]
                     )
+
+                RemoteData.Success conf ->
+                    case conf.account.trialActive || conf.account.subActive of
+                        True ->
+                            initCurrentPage
+                                ( { model
+                                    | route = route
+                                    , config = config
+                                    , auth = LoggedIn token
+                                  }
+                                , Cmd.none
+                                )
+
+                        False ->
+                            case route of
+                                Route.PaymentSucceeded ->
+                                    initCurrentPage
+                                        ( { model
+                                            | route = route
+                                            , config = config
+                                            , auth = LoggedIn token
+                                          }
+                                        , Cmd.none
+                                        )
+
+                                Route.PaymentFailed ->
+                                    initCurrentPage
+                                        ( { model
+                                            | route = route
+                                            , config = config
+                                            , auth = LoggedIn token
+                                          }
+                                        , Cmd.none
+                                        )
+
+                                _ ->
+                                    ( { model
+                                        | config = config
+                                        , auth = LoggedIn token
+                                      }
+                                    , Nav.replaceUrl model.navKey "/app/onboarding"
+                                    )
 
                 _ ->
                     initCurrentPage
@@ -318,6 +406,9 @@ update msg model =
                 ]
             )
 
+        ( Redirect url, _ ) ->
+            ( model, Nav.replaceUrl model.navKey url )
+
         ( UrlChanged url, _ ) ->
             let
                 newRoute =
@@ -332,6 +423,13 @@ update msg model =
                     EditPost.update subMsg pageModel (Profile.getOffset model.config) (getToken model.auth)
             in
             ( { model | page = EditPostPage updatedPageModel }, Cmd.map EditPostMsg updateCmds )
+
+        ( OnboardingMsg subMsg, OnboardingPage pageModel ) ->
+            let
+                ( updatedPageModel, updateCmds ) =
+                    Onboarding.update subMsg pageModel
+            in
+            ( { model | page = OnboardingPage updatedPageModel }, Cmd.map OnboardingMsg updateCmds )
 
         ( CreatePostMsg subMsg, CreatePostPage pageModel ) ->
             let

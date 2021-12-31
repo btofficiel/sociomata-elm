@@ -13,15 +13,37 @@ type alias Profile =
     }
 
 
+type alias AccountDetails =
+    { id : Int
+    , name : String
+    , trialPeriod : Int
+    , trialActive : Bool
+    , subPeriod : Int
+    , subActive : Bool
+    }
+
+
 type alias Config =
     { profile : Maybe Profile
     , email : String
     , twitterConnected : Bool
+    , account : AccountDetails
     }
 
 
 type alias Avatar =
     Maybe String
+
+
+accountDecoder : Decoder AccountDetails
+accountDecoder =
+    Decode.succeed AccountDetails
+        |> required "id" int
+        |> required "name" string
+        |> required "trial_period" int
+        |> required "trial_active" bool
+        |> optional "current_period_end" int 0
+        |> optional "sub_active" bool False
 
 
 profileDecoder : Decoder Profile
@@ -40,6 +62,7 @@ configDecoder =
             |> required "profile" (nullable profileDecoder)
             |> required "email" string
             |> required "twitter" bool
+            |> required "account" accountDecoder
         )
 
 

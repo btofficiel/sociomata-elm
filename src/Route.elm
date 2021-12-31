@@ -20,6 +20,9 @@ type Route
     | CreatePost Query
     | EditPost Int
     | Settings
+    | PaymentFailed
+    | PaymentSucceeded
+    | Onboarding
     | NotFound
 
 
@@ -46,4 +49,7 @@ matchRoute =
         , map EditPost (s "app" </> s "edit" </> int)
         , map Loading (s "app" </> s "loading")
         , map Settings (s "app" </> s "settings")
+        , map PaymentSucceeded (s "app" </> s "payment-successful")
+        , map PaymentFailed (s "app" </> s "payment-failed")
+        , map Onboarding (s "app" </> s "onboarding")
         ]
