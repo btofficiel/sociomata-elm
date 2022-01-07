@@ -8,6 +8,8 @@ import Html.Attributes exposing (..)
 import Html.Events exposing (onClick)
 import Http
 import Page.CreatePost as CreatePost
+import Page.Drafts as Drafts
+import Page.EditDraft as EditDraft
 import Page.EditPost as EditPost
 import Page.Loading as Loading
 import Page.Onboarding as Onboarding
@@ -46,6 +48,8 @@ type Page
     | PaymentFailedPage
     | OnboardingPage Onboarding.Model
     | QueuePage Queue.Model
+    | DraftsPage Drafts.Model
+    | EditDraftPage EditDraft.Model
     | CreatePostPage CreatePost.Model
     | EditPostPage EditPost.Model
     | SettingsPage Settings.Model
@@ -56,6 +60,8 @@ type Msg
     | Redirect String
     | QueueMsg Queue.Msg
     | OnboardingMsg Onboarding.Msg
+    | DraftsMsg Drafts.Msg
+    | EditDraftMsg EditDraft.Msg
     | CreatePostMsg CreatePost.Msg
     | EditPostMsg EditPost.Msg
     | SettingsMsg Settings.Msg
@@ -171,6 +177,20 @@ initCurrentPage ( model, existingCmds ) =
                     in
                     ( CreatePostPage pageModel, Cmd.map CreatePostMsg pageCmds )
 
+                Route.Drafts ->
+                    let
+                        ( pageModel, pageCmds ) =
+                            Drafts.init (getToken model.auth)
+                    in
+                    ( DraftsPage pageModel, Cmd.map DraftsMsg pageCmds )
+
+                Route.EditDraft postId ->
+                    let
+                        ( pageModel, pageCmds ) =
+                            EditDraft.init postId (getToken model.auth)
+                    in
+                    ( EditDraftPage pageModel, Cmd.map EditDraftMsg pageCmds )
+
                 Route.Settings ->
                     let
                         ( pageModel, pageCmds ) =
@@ -254,6 +274,12 @@ currentTitle route =
         Route.Settings ->
             "Account Settings - Sociomata"
 
+        Route.Drafts ->
+            "Drafts - Sociomata"
+
+        Route.EditDraft postId ->
+            "Edit Draft - Sociomata"
+
         Route.NotFound ->
             "Not Found"
 
@@ -292,6 +318,14 @@ currentView model =
             QueuePage pageModel ->
                 Queue.view pageModel model.config
                     |> Html.map QueueMsg
+
+            DraftsPage pageModel ->
+                Drafts.view pageModel model.config
+                    |> Html.map DraftsMsg
+
+            EditDraftPage pageModel ->
+                EditDraft.view pageModel model.config
+                    |> Html.map EditDraftMsg
 
             SettingsPage pageModel ->
                 Settings.view pageModel model.config
@@ -445,6 +479,20 @@ update msg model =
             in
             ( { model | page = QueuePage updatedPageModel }, Cmd.map QueueMsg updateCmds )
 
+        ( DraftsMsg subMsg, DraftsPage pageModel ) ->
+            let
+                ( updatedPageModel, updateCmds ) =
+                    Drafts.update subMsg pageModel (getToken model.auth) model.navKey
+            in
+            ( { model | page = DraftsPage updatedPageModel }, Cmd.map DraftsMsg updateCmds )
+
+        ( EditDraftMsg subMsg, EditDraftPage pageModel ) ->
+            let
+                ( updatedPageModel, updateCmds ) =
+                    EditDraft.update subMsg pageModel (Profile.getOffset model.config) (getToken model.auth)
+            in
+            ( { model | page = EditDraftPage updatedPageModel }, Cmd.map EditDraftMsg updateCmds )
+
         ( SettingsMsg subMsg, SettingsPage pageModel ) ->
             let
                 ( updatedPageModel, updateCmds ) =
@@ -501,6 +549,10 @@ subscriptions model =
             QueuePage _ ->
                 Queue.subscriptions
                     |> Sub.map QueueMsg
+
+            DraftsPage _ ->
+                Drafts.subscriptions
+                    |> Sub.map DraftsMsg
 
             _ ->
                 Sub.none

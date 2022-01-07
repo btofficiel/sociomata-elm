@@ -1,4 +1,4 @@
-port module Page.Queue exposing (Model, Msg, init, subscriptions, update, view)
+port module Page.Queue exposing (Model, Msg, ToggledPost, init, subscriptions, update, view)
 
 import Api
 import Array
@@ -10,7 +10,7 @@ import Html.Attributes exposing (class, id, src, style, type_)
 import Html.Events exposing (onClick, onInput)
 import Html.Keyed
 import Http
-import Json.Decode as D exposing (Decoder)
+import Json.Decode as D
 import MessageBanner as Message exposing (MessageBanner)
 import Page.Loading
 import Post exposing (DictPost, Post, PostId, postsQueueDecoder, timestampToInt)

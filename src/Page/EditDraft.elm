@@ -1,4 +1,4 @@
-port module Page.CreatePost exposing (FileBatch, FileTuple, Model, Msg, Tweet, buildBatch, fileToTuple, init, resetTextArea, resizeTextArea, update, uploadMediaTask, view)
+module Page.EditDraft exposing (Model, Msg, Tweet, init, update, view)
 
 import Api
 import Array
@@ -9,20 +9,21 @@ import Dict exposing (Dict)
 import File exposing (File)
 import File.Select as Select
 import Html exposing (Attribute, Html, button, div, img, input, li, section, span, text, textarea)
-import Html.Attributes as Attrs exposing (class, id, placeholder, src, style, type_, value)
+import Html.Attributes exposing (class, id, placeholder, src, style, type_, value)
 import Html.Events exposing (on, onClick, onInput)
 import Html.Keyed
-import Http exposing (Part, filePart, stringPart)
+import Http
 import Iso8601
 import Json.Decode as D exposing (Decoder, at, field, int, map2, string)
-import Media
 import MessageBanner as Message exposing (MessageBanner)
+import Page.CreatePost exposing (FileBatch, FileTuple, buildBatch, fileToTuple, resetTextArea, resizeTextArea, uploadMediaTask)
 import Page.Loading
+import Post exposing (Post, twitterPostDecoder)
 import Profile exposing (Config)
 import RemoteData exposing (WebData)
 import Request
-import Route exposing (Query, Token)
-import Task exposing (Task)
+import Route exposing (Token)
+import Task
 import Time
 import Tuple
 import Tweet
@@ -30,9 +31,6 @@ import Tweet
         ( Media
         , PresignedURL
         , TwitterMediaKey
-        , mediaBatchPresignedEncoder
-        , mediaForPresignedEncoder
-        , presignedURLDecoder
         , tweetsEncoder
         )
 
@@ -44,14 +42,10 @@ type alias Tweet =
     }
 
 
-type alias FileBatch =
-    { newlyAdded : Bool
-    , tweetOrder : Int
-    , mediaOrder : Int
-    , key : String
-    , file : Maybe File
-    , mime : String
-    }
+type ActionType
+    = SaveDraft
+    | ConvertToSchedule
+    | PostNow
 
 
 type alias Model =
@@ -59,42 +53,55 @@ type alias Model =
     , message : MessageBanner
     , timestamp : Maybe Int
     , fileBatch : List FileBatch
+    , postId : Int
+    , post : WebData Post
+    , toggleMenu : Bool
     }
 
 
-type ActionType
-    = Schedule
-    | PostNow
-    | DraftSave
-
-
-type alias FileTuple =
-    ( File, String )
-
-
 type Msg
-    = SendPostNow
-    | SaveDraft
-    | GetMediaKeys ActionType (Result Http.Error (List PresignedURL))
-    | RemoveTweet Int String
+    = RemoveTweet Int String
+    | SendPostNow
     | FadeMessage
     | EnterTweet Int String String
     | EnterTime String
     | PickMedia Int
     | GotMedia Int File (List File)
+    | GetMediaKeys ActionType (Result Http.Error (List PresignedURL))
     | GotMediaURL Int (List FileTuple)
     | RemoveMedia Int Int
     | GenerateDefaultTime Time.Posix
     | NewTweet Int
     | AddToThread Int Time.Posix
-    | SchedulePost Time.Posix
-    | TrySchedulePost
-    | GotCreatedPost ActionType (Result Http.Error ())
+    | EditDraft Time.Posix
+    | TryEditDraft
+    | ScheduleDraft Time.Posix
+    | TryScheduleDraft
+    | GotDraft (WebData Post)
+    | GotEditedDraft ActionType (Result Http.Error ())
+    | ToggleMenu
     | NoOp
 
 
-init : Query -> ( Model, Cmd Msg )
-init query =
+fetchDraft : Token -> Int -> Cmd Msg
+fetchDraft token postId =
+    let
+        url =
+            String.concat [ "/api/posts/drafts/", String.fromInt postId ]
+    in
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" token ]
+        , url = url
+        , body = Http.emptyBody
+        , expect = Request.expectJson (RemoteData.fromResult >> GotDraft) twitterPostDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+init : Int -> Token -> ( Model, Cmd Msg )
+init postId token =
     let
         tweet =
             { tweet = ""
@@ -104,138 +111,51 @@ init query =
     in
     ( { tweets = [ tweet ]
       , message = Nothing
-      , timestamp = query.timestamp
+      , timestamp = Nothing
       , fileBatch = []
+      , postId = postId
+      , post = RemoteData.Loading
+      , toggleMenu = False
       }
-    , DateTime.getNewTime GenerateDefaultTime
+    , Cmd.batch [ DateTime.getNewTime GenerateDefaultTime, fetchDraft token postId ]
     )
 
 
-buildBatch : List Tweet -> List FileBatch
-buildBatch tweets =
-    tweets
-        |> List.indexedMap
-            (\o t ->
-                t.media
-                    |> List.indexedMap
-                        (\to m ->
-                            { newlyAdded = m.newlyAdded
-                            , tweetOrder = o + 1
-                            , mediaOrder = to + 1
-                            , key = m.imageKey
-                            , file = m.file
-                            , mime =
-                                case m.file of
-                                    Just file ->
-                                        File.mime file
-
-                                    Nothing ->
-                                        ""
-                            }
-                        )
-            )
-        |> List.concat
-
-
-uploadMediaTask : Token -> FileBatch -> Task Http.Error PresignedURL
-uploadMediaTask token file =
-    fetchPresignedURL file token
-        |> Task.andThen
-            (\response ->
-                case response.newlyAdded of
-                    True ->
-                        case file.file of
-                            Just file_ ->
-                                uploadMedia file_ response
-                                    |> Task.andThen (\_ -> Task.succeed response)
-
-                            Nothing ->
-                                Task.fail (Http.BadBody "Oops! Something unexpected happened while uploading your files")
-
-                    False ->
-                        Task.succeed response
-            )
-
-
-fetchPresignedURL : FileBatch -> Token -> Task Http.Error PresignedURL
-fetchPresignedURL file token =
-    let
-        decoder =
-            D.at [ "data", "media" ] presignedURLDecoder
-    in
-    Http.task
-        { method = "POST"
-        , headers = [ Http.header "Authorization" token ]
-        , url = "/api/upload/twitter"
-        , body = Http.jsonBody (mediaForPresignedEncoder file)
-        , resolver = Request.resolveJson decoder
-        , timeout = Nothing
-        }
-
-
-uploadMedia : File -> PresignedURL -> Task Http.Error ()
-uploadMedia file response =
-    case response.newlyAdded of
-        True ->
-            let
-                decoder =
-                    D.succeed ()
-
-                media =
-                    response.fields
-            in
-            Http.task
-                { method = "POST"
-                , headers = []
-                , url = response.url
-                , body =
-                    Http.multipartBody
-                        [ stringPart "key" media.key
-                        , stringPart "bucket" media.bucket
-                        , stringPart "X-Amz-Algorithm" media.algorithm
-                        , stringPart "X-Amz-Credential" media.cred
-                        , stringPart "X-Amz-Date" media.date
-                        , stringPart "Policy" media.policy
-                        , stringPart "X-Amz-Signature" media.signature
-                        , filePart "file" file
-                        ]
-                , resolver = Request.resolveJson decoder
-                , timeout = Nothing
-                }
-
-        False ->
-            Task.succeed ()
-
-
-saveDraft : { tweets : List Tweet, timestamp : Maybe Int, media : List PresignedURL } -> Token -> Cmd Msg
-saveDraft model token =
+editDraft : Int -> { tweets : List Tweet, timestamp : Maybe Int, media : List PresignedURL } -> Token -> Cmd Msg
+editDraft postId model token =
     let
         decoder =
             D.succeed ()
+
+        url =
+            String.concat [ "/api/posts/drafts/", String.fromInt postId ]
     in
     Http.request
-        { method = "POST"
+        { method = "PUT"
         , headers = [ Http.header "Authorization" token ]
-        , url = "/api/posts/drafts"
+        , url = url
         , body = Http.jsonBody (tweetsEncoder model)
-        , expect = Request.expectJson (GotCreatedPost DraftSave) decoder
+        , expect = Request.expectJson (GotEditedDraft SaveDraft) decoder
         , timeout = Nothing
         , tracker = Nothing
         }
 
 
-schedulePost : { tweets : List Tweet, timestamp : Maybe Int, media : List PresignedURL } -> Token -> Cmd Msg
-schedulePost model token =
+scheduleDraft : Int -> { tweets : List Tweet, timestamp : Maybe Int, media : List PresignedURL } -> Token -> Cmd Msg
+scheduleDraft postId model token =
     let
         decoder =
             D.succeed ()
+
+        url =
+            String.concat [ "/api/posts/schedule-draft/", String.fromInt postId ]
     in
     Http.request
-        { method = "POST"
+        { method = "PUT"
         , headers = [ Http.header "Authorization" token ]
-        , url = "/api/posts"
+        , url = url
         , body = Http.jsonBody (tweetsEncoder model)
-        , expect = Request.expectJson (GotCreatedPost Schedule) decoder
+        , expect = Request.expectJson (GotEditedDraft ConvertToSchedule) decoder
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -252,16 +172,10 @@ postNow model token =
         , headers = [ Http.header "Authorization" token ]
         , url = "/api/posts/now"
         , body = Http.jsonBody (tweetsEncoder model)
-        , expect = Request.expectJson (GotCreatedPost PostNow) decoder
+        , expect = Request.expectJson (GotEditedDraft PostNow) decoder
         , timeout = Nothing
         , tracker = Nothing
         }
-
-
-port resizeTextArea : String -> Cmd msg
-
-
-port resetTextArea : String -> Cmd msg
 
 
 calculateTweetProgress : Int -> String
@@ -300,9 +214,6 @@ viewEditor ( order, tweet ) =
                     [ placeholder "Write your tweet"
                     , value tweet.tweet
                     , id tweet.key
-                    , Attrs.attribute "data-gramm" "false"
-                    , Attrs.attribute "data-gramm_editor" "false"
-                    , Attrs.attribute "data-enable-grammarly" "false"
                     , onInput (EnterTweet order tweet.key)
                     ]
                     []
@@ -380,8 +291,8 @@ viewOptions model offset =
                 []
             ]
         , span [ class "buttons" ]
-            [ button [ onClick SaveDraft ] [ text "Save Draft" ]
-            , button [ onClick TrySchedulePost ] [ text "Schedule" ]
+            [ button [ onClick TryEditDraft ] [ text "Save" ]
+            , button [ onClick TryScheduleDraft ] [ text "Schedule" ]
             , button [ onClick SendPostNow ] [ text "Post now" ]
             ]
         ]
@@ -389,38 +300,58 @@ viewOptions model offset =
 
 body : Model -> Offset -> Html Msg
 body model offset =
-    let
-        tweets =
-            List.indexedMap Tuple.pair model.tweets
-    in
-    div [ class "container" ]
-        [ section [ class "creator-two-panels" ]
-            [ div [ class "writer" ]
-                [ section [ class "subheader" ]
-                    [ span [] [ text "Create Post" ]
+    case model.post of
+        RemoteData.NotAsked ->
+            Page.Loading.body
+
+        RemoteData.Loading ->
+            Page.Loading.body
+
+        RemoteData.Success _ ->
+            let
+                tweets =
+                    List.indexedMap Tuple.pair model.tweets
+            in
+            div [ class "container" ]
+                [ section [ class "creator-two-panels" ]
+                    [ div [ class "writer" ]
+                        [ section [ class "subheader" ]
+                            [ span [] [ text "Edit Draft" ]
+                            ]
+                        , viewEditors tweets
+                            |> Html.Keyed.ul []
+                        ]
+                    , div [ class "writer-options" ]
+                        [ viewOptions model offset
+                        ]
                     ]
-                , viewEditors tweets
-                    |> Html.Keyed.ul []
                 ]
-            , div [ class "writer-options" ]
-                [ viewOptions model offset
+
+        RemoteData.Failure (Http.BadBody err) ->
+            div [ class "container" ]
+                [ section [ class "panels" ]
+                    [ Page.Loading.emptyState 80 err
+                    ]
                 ]
-            ]
-        ]
+
+        RemoteData.Failure Http.NetworkError ->
+            div [ class "container" ]
+                [ section [ class "panels" ]
+                    [ Page.Loading.emptyState 80 "Oops! Looks like there is some problem with your network."
+                    ]
+                ]
+
+        _ ->
+            div [] []
 
 
 view : Model -> WebData Config -> Html Msg
 view model config =
     div []
-        [ Message.viewMessage model.message
+        [ {--Page.Loading.headerTest route (Profile.getAvatar config) model.toggleMenu ToggleMenu--}
+          Message.viewMessage model.message
         , body model (Profile.getOffset config)
         ]
-
-
-fileToTuple : File -> Task x ( File, String )
-fileToTuple file =
-    File.toUrl file
-        |> Task.andThen (\url -> Task.succeed ( file, url ))
 
 
 update : Msg -> Model -> Offset -> Token -> ( Model, Cmd Msg )
@@ -438,18 +369,16 @@ update msg model offset token =
 
                         cmd =
                             case postType of
-                                Schedule ->
-                                    schedulePost payload token
+                                SaveDraft ->
+                                    editDraft model.postId payload token
+
+                                ConvertToSchedule ->
+                                    scheduleDraft model.postId payload token
 
                                 PostNow ->
                                     postNow payload token
-
-                                DraftSave ->
-                                    saveDraft payload token
                     in
-                    ( model
-                    , cmd
-                    )
+                    ( model, cmd )
 
                 Err error ->
                     case error of
@@ -499,11 +428,9 @@ update msg model offset token =
                 ( True, True ) ->
                     if List.length new_files <= 4 then
                         ( model
-                        , Cmd.batch
-                            [ List.map fileToTuple new_files
-                                |> Task.sequence
-                                |> Task.perform (GotMediaURL tweet_order)
-                            ]
+                        , List.map fileToTuple new_files
+                            |> Task.sequence
+                            |> Task.perform (GotMediaURL tweet_order)
                         )
 
                     else
@@ -600,28 +527,65 @@ update msg model offset token =
             , Cmd.none
             )
 
-        GotCreatedPost DraftSave (Ok _) ->
+        ToggleMenu ->
+            let
+                toggle =
+                    case model.toggleMenu of
+                        True ->
+                            False
+
+                        False ->
+                            True
+            in
+            ( { model | toggleMenu = toggle }, Cmd.none )
+
+        GotDraft response ->
+            case response of
+                RemoteData.Success post ->
+                    let
+                        tweets =
+                            post.tweets
+                                |> List.map
+                                    (\t ->
+                                        { tweet = t.tweet
+                                        , key = String.fromInt t.tweetOrder
+                                        , media = t.media
+                                        }
+                                    )
+                    in
+                    ( { model
+                        | timestamp = Just (Post.timestampToInt post.timestamp)
+                        , tweets = tweets
+                        , post = RemoteData.Success Post.pseudoPost
+                      }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( { model | post = response }, Cmd.none )
+
+        GotEditedDraft SaveDraft (Ok _) ->
             ( { model
-                | message = Just (Message.Success "Yes! your draft is saved")
+                | message = Just (Message.Success "Yes! your draft has been updated")
               }
             , Message.fadeMessage FadeMessage
             )
 
-        GotCreatedPost Schedule (Ok _) ->
+        GotEditedDraft PostNow (Ok _) ->
             ( { model
-                | message = Just (Message.Success "Yes! your post is scheduled")
+                | message = Just (Message.Success "Yes! your post has been posted")
               }
             , Message.fadeMessage FadeMessage
             )
 
-        GotCreatedPost PostNow (Ok _) ->
+        GotEditedDraft ConvertToSchedule (Ok _) ->
             ( { model
-                | message = Just (Message.Success "Yes! your tweets have been posted")
+                | message = Just (Message.Success "Yes! your post has been scheduled")
               }
             , Message.fadeMessage FadeMessage
             )
 
-        GotCreatedPost _ (Err error) ->
+        GotEditedDraft _ (Err error) ->
             case error of
                 Http.BadBody err ->
                     ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
@@ -664,20 +628,7 @@ update msg model offset token =
                 |> Task.attempt (GetMediaKeys PostNow)
             )
 
-        SaveDraft ->
-            let
-                batch =
-                    buildBatch model.tweets
-            in
-            ( { model
-                | message = Just Message.Loading
-              }
-            , List.map (uploadMediaTask token) batch
-                |> Task.sequence
-                |> Task.attempt (GetMediaKeys DraftSave)
-            )
-
-        TrySchedulePost ->
+        TryEditDraft ->
             let
                 batch =
                     buildBatch model.tweets
@@ -685,10 +636,10 @@ update msg model offset token =
             ( { model
                 | fileBatch = batch
               }
-            , DateTime.getNewTime SchedulePost
+            , DateTime.getNewTime EditDraft
             )
 
-        SchedulePost posix ->
+        EditDraft posix ->
             case model.timestamp of
                 Just timestamp ->
                     let
@@ -700,6 +651,11 @@ update msg model offset token =
 
                         diff =
                             timestamp - ts
+
+                        payload =
+                            { tweets = model.tweets
+                            , timestamp = model.timestamp
+                            }
                     in
                     case diff >= 300 of
                         True ->
@@ -708,7 +664,60 @@ update msg model offset token =
                               }
                             , List.map (uploadMediaTask token) model.fileBatch
                                 |> Task.sequence
-                                |> Task.attempt (GetMediaKeys Schedule)
+                                |> Task.attempt (GetMediaKeys SaveDraft)
+                            )
+
+                        False ->
+                            ( { model
+                                | message = Just (Message.Failure "Please select a datetime atleast 5 mins away from now")
+                              }
+                            , Message.fadeMessage FadeMessage
+                            )
+
+                Nothing ->
+                    ( { model
+                        | message = Just (Message.Failure "Please select a datetime for the post")
+                      }
+                    , Message.fadeMessage FadeMessage
+                    )
+
+        TryScheduleDraft ->
+            let
+                batch =
+                    buildBatch model.tweets
+            in
+            ( { model
+                | fileBatch = batch
+              }
+            , DateTime.getNewTime ScheduleDraft
+            )
+
+        ScheduleDraft posix ->
+            case model.timestamp of
+                Just timestamp ->
+                    let
+                        ts =
+                            toFloat (DateTime.posixToSeconds posix)
+                                / 60
+                                |> floor
+                                |> (*) 60
+
+                        diff =
+                            timestamp - ts
+
+                        payload =
+                            { tweets = model.tweets
+                            , timestamp = model.timestamp
+                            }
+                    in
+                    case diff >= 300 of
+                        True ->
+                            ( { model
+                                | message = Just Message.Loading
+                              }
+                            , List.map (uploadMediaTask token) model.fileBatch
+                                |> Task.sequence
+                                |> Task.attempt (GetMediaKeys ConvertToSchedule)
                             )
 
                         False ->
@@ -726,20 +735,15 @@ update msg model offset token =
                     )
 
         GenerateDefaultTime posix ->
-            case model.timestamp of
-                Just _ ->
-                    ( model, Cmd.none )
-
-                Nothing ->
-                    let
-                        ts =
-                            toFloat (DateTime.posixToSeconds posix)
-                                / 60
-                                |> floor
-                                |> (*) 60
-                                |> (+) 3600
-                    in
-                    ( { model | timestamp = Just ts }, Cmd.none )
+            let
+                ts =
+                    toFloat (DateTime.posixToSeconds posix)
+                        / 60
+                        |> floor
+                        |> (*) 60
+                        |> (+) 3600
+            in
+            ( { model | timestamp = Just ts }, Cmd.none )
 
         EnterTime datetime ->
             let

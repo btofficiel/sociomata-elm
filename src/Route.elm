@@ -17,8 +17,10 @@ type alias Token =
 type Route
     = Loading
     | Index
+    | Drafts
     | CreatePost Query
     | EditPost Int
+    | EditDraft Int
     | Settings
     | PaymentFailed
     | PaymentSucceeded
@@ -47,8 +49,10 @@ matchRoute =
         [ map Index (s "app")
         , map CreatePost (s "app" </> s "create" <?> query)
         , map EditPost (s "app" </> s "edit" </> int)
+        , map EditDraft (s "app" </> s "drafts" </> int)
         , map Loading (s "app" </> s "loading")
         , map Settings (s "app" </> s "settings")
+        , map Drafts (s "app" </> s "drafts")
         , map PaymentSucceeded (s "app" </> s "payment-successful")
         , map PaymentFailed (s "app" </> s "payment-failed")
         , map Onboarding (s "app" </> s "onboarding")
