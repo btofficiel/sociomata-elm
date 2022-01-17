@@ -201,7 +201,11 @@ body model config =
                 False ->
                     div [ class "container" ]
                         [ section [ class "panels" ]
-                            [ Page.Loading.emptyState 80 "You haven't saved any plugs yet"
+                            [ section [ class "subheader" ]
+                                [ span [] [ text "Plugs" ]
+                                , span [ onClick (OpenCreatePlug Nothing) ] [ text "Create Plug" ]
+                                ]
+                            , Page.Loading.emptyState 60 "You haven't created any plugs yet"
                             ]
                         ]
 

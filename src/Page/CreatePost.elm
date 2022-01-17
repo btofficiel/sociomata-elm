@@ -495,7 +495,7 @@ viewSelectPlug plugId plugs =
                             span [ id "selectPlug", onClick ToggleSelectPlug ] [ text "Add a plug tweet" ]
 
                         False ->
-                            span [ id "selectPlug" ] [ text "You don't have plug tweets" ]
+                            span [ id "selectPlug" ] [ text " You don't have plug tweets" ]
 
         RemoteData.Loading ->
             span [ id "selectPlug" ] [ text "Loading plugs..." ]
