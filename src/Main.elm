@@ -7,12 +7,15 @@ import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick)
 import Http
+import Page.CreatePlug as CreatePlug
 import Page.CreatePost as CreatePost
 import Page.Drafts as Drafts
 import Page.EditDraft as EditDraft
+import Page.EditPlug as EditPlug
 import Page.EditPost as EditPost
 import Page.Loading as Loading
 import Page.Onboarding as Onboarding
+import Page.Plugs as Plugs
 import Page.Queue as Queue
 import Page.Settings as Settings
 import Process
@@ -51,7 +54,10 @@ type Page
     | DraftsPage Drafts.Model
     | EditDraftPage EditDraft.Model
     | CreatePostPage CreatePost.Model
+    | CreatePlugPage CreatePlug.Model
+    | PlugsPage Plugs.Model
     | EditPostPage EditPost.Model
+    | EditPlugPage EditPlug.Model
     | SettingsPage Settings.Model
 
 
@@ -61,9 +67,12 @@ type Msg
     | QueueMsg Queue.Msg
     | OnboardingMsg Onboarding.Msg
     | DraftsMsg Drafts.Msg
+    | PlugsMsg Plugs.Msg
     | EditDraftMsg EditDraft.Msg
     | CreatePostMsg CreatePost.Msg
+    | CreatePlugMsg CreatePlug.Msg
     | EditPostMsg EditPost.Msg
+    | EditPlugMsg EditPlug.Msg
     | SettingsMsg Settings.Msg
     | GotConfig Route Token (WebData Config)
     | UrlChanged Url
@@ -170,12 +179,26 @@ initCurrentPage ( model, existingCmds ) =
                     in
                     ( EditPostPage pageModel, Cmd.map EditPostMsg pageCmds )
 
+                Route.EditPlug plugId ->
+                    let
+                        ( pageModel, pageCmds ) =
+                            EditPlug.init plugId (getToken model.auth)
+                    in
+                    ( EditPlugPage pageModel, Cmd.map EditPlugMsg pageCmds )
+
                 Route.CreatePost query ->
                     let
                         ( pageModel, pageCmds ) =
-                            CreatePost.init query
+                            CreatePost.init (getToken model.auth) query
                     in
                     ( CreatePostPage pageModel, Cmd.map CreatePostMsg pageCmds )
+
+                Route.CreatePlug ->
+                    let
+                        ( pageModel, pageCmds ) =
+                            CreatePlug.init
+                    in
+                    ( CreatePlugPage pageModel, Cmd.map CreatePlugMsg pageCmds )
 
                 Route.Drafts ->
                     let
@@ -183,6 +206,13 @@ initCurrentPage ( model, existingCmds ) =
                             Drafts.init (getToken model.auth)
                     in
                     ( DraftsPage pageModel, Cmd.map DraftsMsg pageCmds )
+
+                Route.Plugs ->
+                    let
+                        ( pageModel, pageCmds ) =
+                            Plugs.init (getToken model.auth)
+                    in
+                    ( PlugsPage pageModel, Cmd.map PlugsMsg pageCmds )
 
                 Route.EditDraft postId ->
                     let
@@ -265,8 +295,14 @@ currentTitle route =
         Route.CreatePost query ->
             "Create Post - Sociomata"
 
-        Route.EditPost postId ->
+        Route.CreatePlug ->
+            "Create Plug - Sociomata"
+
+        Route.EditPost _ ->
             "Edit Post - Sociomata"
+
+        Route.EditPlug _ ->
+            "Edit Plug - Sociomata"
 
         Route.Index ->
             "Posts - Sociomata"
@@ -277,7 +313,10 @@ currentTitle route =
         Route.Drafts ->
             "Drafts - Sociomata"
 
-        Route.EditDraft postId ->
+        Route.Plugs ->
+            "Plugs - Sociomata"
+
+        Route.EditDraft _ ->
             "Edit Draft - Sociomata"
 
         Route.NotFound ->
@@ -315,6 +354,10 @@ currentView model =
                 CreatePost.view pageModel model.config
                     |> Html.map CreatePostMsg
 
+            CreatePlugPage pageModel ->
+                CreatePlug.view pageModel
+                    |> Html.map CreatePlugMsg
+
             QueuePage pageModel ->
                 Queue.view pageModel model.config
                     |> Html.map QueueMsg
@@ -322,6 +365,14 @@ currentView model =
             DraftsPage pageModel ->
                 Drafts.view pageModel model.config
                     |> Html.map DraftsMsg
+
+            PlugsPage pageModel ->
+                Plugs.view pageModel model.config
+                    |> Html.map PlugsMsg
+
+            EditPlugPage pageModel ->
+                EditPlug.view pageModel
+                    |> Html.map EditPlugMsg
 
             EditDraftPage pageModel ->
                 EditDraft.view pageModel model.config
@@ -472,6 +523,13 @@ update msg model =
             in
             ( { model | page = CreatePostPage updatedPageModel }, Cmd.map CreatePostMsg updateCmds )
 
+        ( CreatePlugMsg subMsg, CreatePlugPage pageModel ) ->
+            let
+                ( updatedPageModel, updateCmds ) =
+                    CreatePlug.update subMsg pageModel (getToken model.auth)
+            in
+            ( { model | page = CreatePlugPage updatedPageModel }, Cmd.map CreatePlugMsg updateCmds )
+
         ( QueueMsg subMsg, QueuePage pageModel ) ->
             let
                 ( updatedPageModel, updateCmds ) =
@@ -486,12 +544,26 @@ update msg model =
             in
             ( { model | page = DraftsPage updatedPageModel }, Cmd.map DraftsMsg updateCmds )
 
+        ( PlugsMsg subMsg, PlugsPage pageModel ) ->
+            let
+                ( updatedPageModel, updateCmds ) =
+                    Plugs.update subMsg pageModel (getToken model.auth) model.navKey
+            in
+            ( { model | page = PlugsPage updatedPageModel }, Cmd.map PlugsMsg updateCmds )
+
         ( EditDraftMsg subMsg, EditDraftPage pageModel ) ->
             let
                 ( updatedPageModel, updateCmds ) =
                     EditDraft.update subMsg pageModel (Profile.getOffset model.config) (getToken model.auth)
             in
             ( { model | page = EditDraftPage updatedPageModel }, Cmd.map EditDraftMsg updateCmds )
+
+        ( EditPlugMsg subMsg, EditPlugPage pageModel ) ->
+            let
+                ( updatedPageModel, updateCmds ) =
+                    EditPlug.update subMsg pageModel (getToken model.auth)
+            in
+            ( { model | page = EditPlugPage updatedPageModel }, Cmd.map EditPlugMsg updateCmds )
 
         ( SettingsMsg subMsg, SettingsPage pageModel ) ->
             let
@@ -553,6 +625,22 @@ subscriptions model =
             DraftsPage _ ->
                 Drafts.subscriptions
                     |> Sub.map DraftsMsg
+
+            CreatePostPage _ ->
+                CreatePost.subscriptions
+                    |> Sub.map CreatePostMsg
+
+            EditPostPage _ ->
+                EditPost.subscriptions
+                    |> Sub.map EditPostMsg
+
+            EditDraftPage _ ->
+                EditDraft.subscriptions
+                    |> Sub.map EditDraftMsg
+
+            PlugsPage _ ->
+                Plugs.subscriptions
+                    |> Sub.map PlugsMsg
 
             _ ->
                 Sub.none

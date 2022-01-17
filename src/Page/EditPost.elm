@@ -1,4 +1,4 @@
-module Page.EditPost exposing (Model, Msg, Tweet, init, update, view)
+port module Page.EditPost exposing (Model, Msg, Tweet, init, subscriptions, update, view)
 
 import Api
 import Array
@@ -8,7 +8,7 @@ import DateTime exposing (Offset)
 import Dict exposing (Dict)
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Attribute, Html, button, div, img, input, li, section, span, text, textarea)
+import Html exposing (Attribute, Html, button, div, img, input, li, section, span, text, textarea, ul)
 import Html.Attributes exposing (class, id, placeholder, src, style, type_, value)
 import Html.Events exposing (on, onClick, onInput)
 import Html.Keyed
@@ -16,8 +16,9 @@ import Http
 import Iso8601
 import Json.Decode as D exposing (Decoder, at, field, int, map2, string)
 import MessageBanner as Message exposing (MessageBanner)
-import Page.CreatePost exposing (FileBatch, FileTuple, buildBatch, fileToTuple, resetTextArea, resizeTextArea, uploadMediaTask)
+import Page.CreatePost exposing (FileBatch, FileTuple, SelectedPlug, buildBatch, fileToTuple, resetTextArea, resizeTextArea, uploadMediaTask)
 import Page.Loading
+import Plug exposing (Plug, plugsDecoder)
 import Post exposing (Post, twitterPostDecoder)
 import Profile exposing (Config)
 import RemoteData exposing (WebData)
@@ -46,6 +47,8 @@ type alias Model =
     { tweets : List Tweet
     , message : MessageBanner
     , timestamp : Maybe Int
+    , plugs : WebData (List Plug)
+    , plug : SelectedPlug
     , fileBatch : List FileBatch
     , postId : Int
     , post : WebData Post
@@ -69,10 +72,32 @@ type Msg
     | AddToThread Int Time.Posix
     | SchedulePost Time.Posix
     | TrySchedulePost
+    | ToggleSelectPlug
+    | TurnOffSelectPlug
+    | SelectPlug Int
+    | RemovePlug
     | GotPost (WebData Post)
+    | GotPlugs (WebData (List Plug))
     | GotEditedPost (Result Http.Error ())
     | ToggleMenu
     | NoOp
+
+
+fetchPlugs : Token -> Cmd Msg
+fetchPlugs token =
+    let
+        url =
+            "/api/plugs"
+    in
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" token ]
+        , url = url
+        , body = Http.emptyBody
+        , expect = Request.expectJson (RemoteData.fromResult >> GotPlugs) plugsDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
 
 
 fetchPost : Token -> Int -> Cmd Msg
@@ -104,16 +129,34 @@ init postId token =
     ( { tweets = [ tweet ]
       , message = Nothing
       , timestamp = Nothing
+      , plugs = RemoteData.Loading
+      , plug =
+            { plugId = Nothing
+            , toggled = False
+            }
       , fileBatch = []
       , postId = postId
       , post = RemoteData.Loading
       , toggleMenu = False
       }
-    , Cmd.batch [ DateTime.getNewTime GenerateDefaultTime, fetchPost token postId ]
+    , Cmd.batch
+        [ DateTime.getNewTime GenerateDefaultTime
+        , fetchPost token postId
+        , fetchPlugs token
+        ]
     )
 
 
-schedulePost : Int -> { tweets : List Tweet, timestamp : Maybe Int, media : List PresignedURL } -> Token -> Cmd Msg
+schedulePost :
+    Int
+    ->
+        { tweets : List Tweet
+        , plug : Maybe Int
+        , timestamp : Maybe Int
+        , media : List PresignedURL
+        }
+    -> Token
+    -> Cmd Msg
 schedulePost postId model token =
     let
         decoder =
@@ -231,6 +274,85 @@ timestampToHumanTime ts offset =
             ""
 
 
+viewPlug : Plug -> Html Msg
+viewPlug plug =
+    li [ onClick (SelectPlug plug.id) ] [ text plug.name ]
+
+
+viewPlugs : WebData (List Plug) -> SelectedPlug -> Html Msg
+viewPlugs plugs selectedPlug =
+    case plugs of
+        RemoteData.Success plugs_ ->
+            span
+                [ class "plug-options"
+                , id "selectPlugOptions"
+                , style "display"
+                    (case selectedPlug.toggled of
+                        True ->
+                            "block"
+
+                        False ->
+                            "none"
+                    )
+                ]
+                [ ul [ class "settings-menu" ]
+                    ((case selectedPlug.plugId of
+                        Just _ ->
+                            [ li
+                                [ style "font-weight" "700"
+                                , style "opacity" "0.5"
+                                , onClick RemovePlug
+                                ]
+                                [ text "Remove Plug" ]
+                            ]
+
+                        Nothing ->
+                            []
+                     )
+                        ++ (plugs_
+                                |> List.map viewPlug
+                           )
+                    )
+                ]
+
+        _ ->
+            span [ style "display" "none" ] []
+
+
+viewSelectPlug : Maybe Int -> WebData (List Plug) -> Html Msg
+viewSelectPlug plugId plugs =
+    case plugs of
+        RemoteData.Success plugs_ ->
+            case plugId of
+                Just id_ ->
+                    let
+                        foundPlug =
+                            plugs_
+                                |> List.filter (\p -> p.id == id_)
+                                |> List.head
+                    in
+                    case foundPlug of
+                        Just plug_ ->
+                            span [ id "selectPlug", style "font-weight" "500", onClick ToggleSelectPlug ] [ text plug_.name ]
+
+                        Nothing ->
+                            span [ id "selectPlug" ] [ text "Oop! Please reload" ]
+
+                Nothing ->
+                    case List.length plugs_ > 0 of
+                        True ->
+                            span [ id "selectPlug", onClick ToggleSelectPlug ] [ text "Add a plug tweet" ]
+
+                        False ->
+                            span [ id "selectPlug" ] [ text "You don't have plug tweets" ]
+
+        RemoteData.Loading ->
+            span [ id "selectPlug" ] [ text "Loading plugs..." ]
+
+        _ ->
+            span [ id "selectPlug" ] [ text "Oop! Please reload" ]
+
+
 viewOptions : Model -> Offset -> Html Msg
 viewOptions model offset =
     div []
@@ -244,6 +366,12 @@ viewOptions model offset =
                 , value (timestampToHumanTime model.timestamp offset)
                 ]
                 []
+            , span [ class "w-option-name" ]
+                [ text "Plug" ]
+            , div [ class "select-plug" ]
+                [ viewSelectPlug model.plug.plugId model.plugs
+                , viewPlugs model.plugs model.plug
+                ]
             ]
         , span [ class "button" ]
             [ button [ onClick TrySchedulePost ] [ text "Update post" ]
@@ -307,15 +435,103 @@ view model config =
         ]
 
 
+port turnOffEPSelectPlug : (() -> msg) -> Sub msg
+
+
+subscriptions : Sub Msg
+subscriptions =
+    turnOffEPSelectPlug (always TurnOffSelectPlug)
+
+
 update : Msg -> Model -> Offset -> Token -> ( Model, Cmd Msg )
 update msg model offset token =
     case msg of
+        TurnOffSelectPlug ->
+            let
+                plug =
+                    model.plug
+
+                new_plug =
+                    { plug | toggled = False }
+            in
+            ( { model
+                | plug = new_plug
+              }
+            , Cmd.none
+            )
+
+        RemovePlug ->
+            let
+                plug =
+                    model.plug
+
+                new_plug =
+                    { plug | plugId = Nothing, toggled = False }
+            in
+            ( { model
+                | plug = new_plug
+              }
+            , Cmd.none
+            )
+
+        SelectPlug plugId ->
+            let
+                plug =
+                    model.plug
+
+                new_plug =
+                    { plug | plugId = Just plugId, toggled = False }
+            in
+            ( { model
+                | plug = new_plug
+              }
+            , Cmd.none
+            )
+
+        ToggleSelectPlug ->
+            let
+                plug =
+                    model.plug
+
+                new_plug =
+                    { plug | toggled = not model.plug.toggled }
+            in
+            ( { model
+                | plug = new_plug
+              }
+            , Cmd.none
+            )
+
+        GotPlugs response ->
+            case response of
+                RemoteData.Failure (Http.BadBody err) ->
+                    ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
+                RemoteData.Failure Http.NetworkError ->
+                    let
+                        err =
+                            "Oops! Looks like there is some problem with your network."
+                    in
+                    ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
+                RemoteData.Failure (Http.BadStatus 401) ->
+                    ( model
+                    , Cmd.batch
+                        [ Api.deleteToken ()
+                        , Nav.load "/login"
+                        ]
+                    )
+
+                _ ->
+                    ( { model | plugs = response }, Cmd.none )
+
         GetMediaKeys result ->
             case result of
                 Ok media ->
                     let
                         payload =
                             { tweets = model.tweets
+                            , plug = model.plug.plugId
                             , timestamp = model.timestamp
                             , media = media
                             }
@@ -485,6 +701,12 @@ update msg model offset token =
             case response of
                 RemoteData.Success post ->
                     let
+                        plug =
+                            model.plug
+
+                        new_plug =
+                            { plug | plugId = post.plugId }
+
                         tweets =
                             post.tweets
                                 |> List.map
@@ -497,6 +719,7 @@ update msg model offset token =
                     in
                     ( { model
                         | timestamp = Just (Post.timestampToInt post.timestamp)
+                        , plug = new_plug
                         , tweets = tweets
                         , post = RemoteData.Success Post.pseudoPost
                       }

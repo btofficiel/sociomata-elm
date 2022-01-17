@@ -17,6 +17,9 @@ checkIfActive route menuName =
         ( Route.Drafts, "Drafts" ) ->
             [ class "active" ]
 
+        ( Route.Plugs, "Plugs" ) ->
+            [ class "active" ]
+
         ( _, _ ) ->
             []
 
@@ -29,6 +32,9 @@ getHref navItem =
 
         "Drafts" ->
             "/app/drafts"
+
+        "Plugs" ->
+            "/app/plugs"
 
         _ ->
             "/app/"
@@ -65,6 +71,7 @@ header route avatar visible ( toggle, logout ) =
                 [ {--"Queue", "Board", "Categories", "Plugs"--}
                   "Queue"
                 , "Drafts"
+                , "Plugs"
                 ]
         , span [ class "logo-wrapper" ]
             [ img

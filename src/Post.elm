@@ -12,6 +12,7 @@ type alias Post =
     , timestamp : Timestamp
     , recurring : Bool
     , description : String
+    , plugId : Maybe Int
     , categoryId : Maybe CategoryId
     , status : Int
     , tweets : List Tweet
@@ -78,6 +79,7 @@ postDecoder postType =
                 |> required "timestamp" timestampDecoder
                 |> required "recurring" bool
                 |> required "description" string
+                |> required "plug_id" (nullable int)
                 |> required "category_id" (nullable categoryIdDecoder)
                 |> required "status" int
 
@@ -120,6 +122,7 @@ pseudoPost =
     , timestamp = Timestamp -1
     , recurring = False
     , description = ""
+    , plugId = Nothing
     , categoryId = Nothing
     , status = -1
     , tweets = []

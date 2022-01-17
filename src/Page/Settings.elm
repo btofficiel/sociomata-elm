@@ -325,7 +325,7 @@ profileSettingsView model =
                 |> select [ onInput StoreTimezone ]
             , span [] [ text "Twitter Account" ]
             , twitterConnectionButton model.twitter
-            , button [ onClick UpdateProfile ] [ text "Upate profile" ]
+            , button [ onClick UpdateProfile ] [ text "Update profile" ]
             ]
         , div [ class "avatar-settings-container" ]
             [ div [ class "avatar-container" ]
