@@ -14,7 +14,7 @@ import Json.Decode as D
 import MessageBanner as Message exposing (MessageBanner)
 import Page.Loading
 import Post exposing (DictPost, Post, PostId, postsQueueDecoder, timestampToInt)
-import Profile exposing (Avatar, Config)
+import Profile exposing (Avatar, Config, displayOnboardingMessage)
 import RemoteData exposing (WebData)
 import Request
 import Route exposing (Token)
@@ -91,15 +91,19 @@ deletePost token day postId =
         }
 
 
-init : Token -> ( Model, Cmd Msg )
-init token =
+init : Token -> WebData Config -> ( Model, Cmd Msg )
+init token config =
+    let
+        message =
+            displayOnboardingMessage config
+    in
     ( { posts = RemoteData.Loading
       , baseTime = 0
       , toggledPost =
             { post = Nothing
             , askDeleteConfirmation = False
             }
-      , message = Nothing
+      , message = message
       }
     , Cmd.batch [ fetchPosts token Nothing, DateTime.getNewTime GenerateCurrentTime ]
     )

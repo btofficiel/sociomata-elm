@@ -8,6 +8,7 @@ import Task
 
 type Message
     = Loading
+    | Onboarding String
     | Success String
     | Failure String
 
@@ -33,6 +34,9 @@ viewMessage message =
                     Just Loading ->
                         "loading"
 
+                    Just (Onboarding _) ->
+                        "onboardingMsg"
+
                     Just (Success _) ->
                         "success"
 
@@ -54,6 +58,9 @@ viewMessage message =
                     , span [ class "dot-flashing" ] []
                     , span [ class "dot-flashing" ] []
                     ]
+
+                Just (Onboarding msg) ->
+                    [ text msg ]
 
                 Just (Failure msg) ->
                     [ text msg ]

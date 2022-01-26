@@ -1,7 +1,8 @@
-module Profile exposing (Avatar, Config, Profile, configDecoder, getAvatar, getOffset)
+module Profile exposing (Avatar, Config, Profile, configDecoder, displayOnboardingMessage, getAvatar, getOffset)
 
 import Json.Decode as Decode exposing (Decoder, bool, int, list, nullable, string)
 import Json.Decode.Pipeline exposing (optional, required)
+import MessageBanner as Message exposing (MessageBanner)
 import RemoteData exposing (WebData)
 
 
@@ -91,6 +92,21 @@ getAvatar config =
 
                 Nothing ->
                     Nothing
+
+        _ ->
+            Nothing
+
+
+displayOnboardingMessage : WebData Config -> MessageBanner
+displayOnboardingMessage conf =
+    case conf of
+        RemoteData.Success config ->
+            case config.twitterConnected of
+                True ->
+                    Nothing
+
+                False ->
+                    Just (Message.Onboarding "Get started by connecting your twitter account in settings")
 
         _ ->
             Nothing

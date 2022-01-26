@@ -168,7 +168,7 @@ initCurrentPage ( model, existingCmds ) =
                 Route.Index ->
                     let
                         ( pageModel, pageCmds ) =
-                            Queue.init (getToken model.auth)
+                            Queue.init (getToken model.auth) model.config
                     in
                     ( QueuePage pageModel, Cmd.map QueueMsg pageCmds )
 
