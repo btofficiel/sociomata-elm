@@ -834,22 +834,61 @@ update msg model offset token =
             )
 
         GotCreatedPost DraftSave (Ok _) ->
+            let
+                tweet =
+                    { tweet = ""
+                    , key = "tweet#1"
+                    , media = []
+                    }
+            in
             ( { model
                 | message = Just (Message.Success "Yes! your draft is saved")
+                , tweets = [ tweet ]
+                , fileBatch = []
+                , plug =
+                    { plugId = Nothing
+                    , toggled = False
+                    }
               }
             , Message.fadeMessage FadeMessage
             )
 
         GotCreatedPost Schedule (Ok _) ->
+            let
+                tweet =
+                    { tweet = ""
+                    , key = "tweet#1"
+                    , media = []
+                    }
+            in
             ( { model
                 | message = Just (Message.Success "Yes! your post is scheduled")
+                , tweets = [ tweet ]
+                , fileBatch = []
+                , plug =
+                    { plugId = Nothing
+                    , toggled = False
+                    }
               }
             , Message.fadeMessage FadeMessage
             )
 
         GotCreatedPost PostNow (Ok _) ->
+            let
+                tweet =
+                    { tweet = ""
+                    , key = "tweet#1"
+                    , media = []
+                    }
+            in
             ( { model
                 | message = Just (Message.Success "Yes! your tweets have been posted")
+                , tweets = [ tweet ]
+                , fileBatch = []
+                , plug =
+                    { plugId = Nothing
+                    , toggled = False
+                    }
               }
             , Message.fadeMessage FadeMessage
             )
