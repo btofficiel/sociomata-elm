@@ -73,6 +73,7 @@ type View
     = AccountSettings
     | ProfileSettings
     | PaymentSettings
+    | SocialAccountsSettings
 
 
 init : Token -> ( Model, Cmd Msg )
@@ -210,6 +211,21 @@ changeSettingsMenuClass subview selection =
             ""
 
 
+calculateAccountLimit : Int -> Float -> String
+calculateAccountLimit accounts total =
+    let
+        progress =
+            toFloat accounts
+                / total
+
+        width =
+            progress
+                |> (*) 8
+                |> String.fromFloat
+    in
+    width
+
+
 settingsMenu : View -> Html Msg
 settingsMenu subview =
     ul [ class "settings-menu" ]
@@ -232,6 +248,12 @@ settingsMenu subview =
             , onClick (ChangeSubView PaymentSettings)
             ]
             [ text "Payment settings" ]
+        , li
+            [ changeSettingsMenuClass subview SocialAccountsSettings
+                |> class
+            , onClick (ChangeSubView SocialAccountsSettings)
+            ]
+            [ text "Social Accounts" ]
         ]
 
 
@@ -336,6 +358,72 @@ profileSettingsView model =
         ]
 
 
+socialAccountSettings : Model -> Html Msg
+socialAccountSettings model =
+    div [ class "social-account-settings" ]
+        [ div [ class "add-account" ]
+            [ span [ class "social-header" ]
+                [ text "Connect a new account" ]
+            , span [ class "twitter-counter" ]
+                [ span []
+                    [ text
+                        (String.concat
+                            [ String.fromInt 1
+                            , "/4"
+                            ]
+                        )
+                    ]
+                , span [ class "tweet-count-indicator" ]
+                    [ span
+                        [ class "tweet-count-progress"
+                        , style "width"
+                            (String.concat
+                                [ calculateAccountLimit 1 4
+                                , "rem"
+                                ]
+                            )
+                        ]
+                        []
+                    ]
+                ]
+            ]
+        , div [ class "platforms" ]
+            [ div [ class "platform" ]
+                [ img [ class "social-logo", src "/images/twitter.png" ] []
+                , span [ class "platform-name" ] [ text "Twitter" ]
+                , span [ class "platform-account" ] [ text "Profile" ]
+                , span [ class "button" ]
+                    [ button [] [ text "Connect" ]
+                    ]
+                ]
+            , div [ class "platform" ]
+                [ img [ class "social-logo", src "/images/fb.png" ] []
+                , span [ class "platform-name" ] [ text "Facebook" ]
+                , span [ class "platform-account" ] [ text "Page or Group" ]
+                , span [ class "button" ]
+                    [ button [] [ text "Connect" ]
+                    ]
+                ]
+            , div [ class "platform" ]
+                [ img [ class "social-logo", src "/images/ig.png" ] []
+                , span [ class "platform-name" ] [ text "Instagram" ]
+                , span [ class "platform-account" ] [ text "Business account" ]
+                , span [ class "button" ]
+                    [ button [] [ text "Connect" ]
+                    ]
+                ]
+            , div [ class "platform" ]
+                [ img [ class "social-logo", src "/images/linkedin.png" ] []
+                , span [ class "platform-name" ] [ text "LinkedIn" ]
+                , span [ class "platform-account" ] [ text "Page or Profile" ]
+                , span [ class "button" ]
+                    [ button [] [ text "Connect" ]
+                    ]
+                ]
+            ]
+        ]
+
+
 paymentSettingsView : Model -> Html Msg
 paymentSettingsView model =
     case model.transactions of
@@ -431,6 +519,9 @@ viewSettingsForms model =
 
         PaymentSettings ->
             paymentSettingsView model
+
+        SocialAccountsSettings ->
+            socialAccountSettings model
 
 
 body : Model -> Html Msg
