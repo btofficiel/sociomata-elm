@@ -1,27 +1,36 @@
-module Page.Settings exposing (Model, Msg(..), init, update, view)
+port module Page.Settings exposing (Model, Msg(..), init, subscriptions, update, view)
 
 import Api
 import Browser.Navigation as Nav
 import DateTime
 import File exposing (File)
 import File.Select as Select
-import Html exposing (Html, button, div, img, input, li, option, section, select, span, table, td, text, th, tr, ul)
-import Html.Attributes exposing (class, placeholder, selected, src, style, type_, value)
+import Html exposing (Html, button, div, hr, img, input, li, option, section, select, span, table, td, text, textarea, th, tr, ul)
+import Html.Attributes exposing (class, id, placeholder, selected, src, style, type_, value)
 import Html.Events exposing (onClick, onInput, onMouseOut, onMouseOver)
+import Html.Keyed
 import Http
 import Json.Decode as Decode exposing (Decoder, string)
 import Json.Encode as Encode
 import MessageBanner as Message exposing (MessageBanner)
 import Page.Loading
 import Payments exposing (Transaction, transactionsDecoder)
+import Plan exposing (Plan, plansDecoder)
 import Profile exposing (Config, configDecoder)
 import RemoteData exposing (WebData)
 import Request
 import Route exposing (Token)
+import SocialAccount exposing (SocialAccount, socialAccountsDecoder)
 import Task
+import Team exposing (Member, inviteesEncoder, membersDecoder)
 import Time
 import Timezone exposing (Timezone, timezonesDecoder)
 import Tweet as T
+
+
+type Location
+    = India
+    | RoW
 
 
 type alias Model =
@@ -35,13 +44,16 @@ type alias Model =
     , timezones : WebData (List Timezone)
     , transactions : WebData (List Transaction)
     , avatar : Maybe String
-    , twitter : AccountConnection
-    }
-
-
-type alias AccountConnection =
-    { connected : Bool
-    , showDisconnectButon : Bool
+    , isAdmin : Bool
+    , maxUsers : Int
+    , maxAccounts : Int
+    , members : WebData (List Member)
+    , invitees : String
+    , plans : WebData (List Plan)
+    , socials : WebData (List SocialAccount)
+    , yourPlan : Int
+    , location : Location
+    , toggledSocial : ToggledAccount
     }
 
 
@@ -51,6 +63,9 @@ type Msg
     | GotAvatar File
     | GotTimezones (WebData (List Timezone))
     | GotTransactions (WebData (List Transaction))
+    | GotMembers (WebData (List Member))
+    | GotPlans (WebData (List Plan))
+    | GotSocialAccounts (WebData (List SocialAccount))
     | GotConnectToken (WebData String)
     | GotAvatarURL String
     | GotUpdatedProfile (WebData Config)
@@ -62,18 +77,33 @@ type Msg
     | StoreCurrentPassword String
     | StoreNewPassword String
     | RequestConnectToken
-    | DisconnectTwitter
-    | GotDeletedAccount (Result Http.Error ())
+    | GotDeletedAccount Int (Result Http.Error ())
     | UpdateProfile
     | UpdateAccount
-    | ToggleDisconnectButton Bool
+    | EnterInvitees String
+    | InviteMembers
+    | GotInvitees (Result Http.Error ())
+    | ChangeCountry Location
+    | MakePayment String
+    | ToggleSocialActions Int
+    | TurnOffSocialMenu
+    | PromptDeleteSocial
+    | DeleteSocial Int
 
 
 type View
     = AccountSettings
     | ProfileSettings
     | PaymentSettings
+    | TeamSettings
+    | BillingPlans
     | SocialAccountsSettings
+
+
+type alias ToggledAccount =
+    { social : Maybe Int
+    , askDeleteConfirmation : Bool
+    }
 
 
 init : Token -> ( Model, Cmd Msg )
@@ -85,18 +115,30 @@ init token =
             , password = ""
             , newPassword = ""
             , timezone = 80
-            , message = Nothing
+            , message = Just (Message.Onboarding "Facebook and Instagram integration are being tested in private beta and will be rolled out to everyone within 1-2 weeks")
             , subView = ProfileSettings
             , timezones = RemoteData.Loading
             , transactions = RemoteData.Loading
             , avatar = Nothing
-            , twitter =
-                { connected = False
-                , showDisconnectButon = False
+            , isAdmin = False
+            , maxUsers = 1
+            , maxAccounts = 1
+            , members = RemoteData.Loading
+            , invitees = ""
+            , plans = RemoteData.Loading
+            , socials = RemoteData.Loading
+            , yourPlan = 1
+            , location = RoW
+            , toggledSocial =
+                { social = Nothing
+                , askDeleteConfirmation = False
                 }
             }
     in
-    ( model, Cmd.batch [ fetchTimezones token, fetchTransactions token ] )
+    ( model, Cmd.batch [ fetchTimezones token, fetchTransactions token, fetchPlans token, fetchSocialAccounts token ] )
+
+
+port switchPlan : String -> Cmd msg
 
 
 accountEncoder : Model -> Encode.Value
@@ -143,6 +185,23 @@ updateProfile model token =
         }
 
 
+inviteMembers : List String -> Token -> Cmd Msg
+inviteMembers invitees token =
+    let
+        decoder =
+            Decode.succeed ()
+    in
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" token ]
+        , url = "/api/invite"
+        , body = Http.jsonBody (inviteesEncoder invitees)
+        , expect = Request.expectJson GotInvitees decoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
 fetchTransactions : Token -> Cmd Msg
 fetchTransactions token =
     Http.request
@@ -151,6 +210,45 @@ fetchTransactions token =
         , url = "/api/transactions"
         , body = Http.emptyBody
         , expect = Request.expectJson (RemoteData.fromResult >> GotTransactions) transactionsDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+fetchPlans : Token -> Cmd Msg
+fetchPlans token =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" token ]
+        , url = "/api/plans"
+        , body = Http.emptyBody
+        , expect = Request.expectJson (RemoteData.fromResult >> GotPlans) plansDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+fetchSocialAccounts : Token -> Cmd Msg
+fetchSocialAccounts token =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" token ]
+        , url = "/api/socials"
+        , body = Http.emptyBody
+        , expect = Request.expectJson (RemoteData.fromResult >> GotSocialAccounts) socialAccountsDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+fetchMembers : Token -> Cmd Msg
+fetchMembers token =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" token ]
+        , url = "/api/members"
+        , body = Http.emptyBody
+        , expect = Request.expectJson (RemoteData.fromResult >> GotMembers) membersDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -181,21 +279,21 @@ fetchConnectToken token =
         }
 
 
-disconnectTwitter : Token -> Cmd Msg
-disconnectTwitter token =
+disconnectSocial : Int -> Token -> Cmd Msg
+disconnectSocial socialId token =
     let
         decoder =
             Decode.succeed ()
 
         url =
-            "/api/connect/twitter"
+            "/api/connect/twitter/" ++ String.fromInt socialId
     in
     Http.request
         { method = "DELETE"
         , headers = [ Http.header "Authorization" token ]
         , url = url
         , body = Http.emptyBody
-        , expect = Request.expectJson GotDeletedAccount decoder
+        , expect = Request.expectJson (GotDeletedAccount socialId) decoder
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -226,35 +324,60 @@ calculateAccountLimit accounts total =
     width
 
 
-settingsMenu : View -> Html Msg
-settingsMenu subview =
+settingsMenu : Model -> Html Msg
+settingsMenu model =
     ul [ class "settings-menu" ]
-        [ {---li
-            [ changeSettingsMenuClass subview AccountSettings
+        ([ {---li
+            [ changeSettingsMenuClass  AccountSettings
                 |> class
             , onClick (ChangeSubView AccountSettings)
             ]
             [ text "Account settings" ]
             ,--}
-          li
-            [ changeSettingsMenuClass subview ProfileSettings
+           li
+            [ changeSettingsMenuClass model.subView ProfileSettings
                 |> class
             , onClick (ChangeSubView ProfileSettings)
             ]
             [ text "Profile settings" ]
-        , li
-            [ changeSettingsMenuClass subview PaymentSettings
-                |> class
-            , onClick (ChangeSubView PaymentSettings)
-            ]
-            [ text "Payment settings" ]
-        , li
-            [ changeSettingsMenuClass subview SocialAccountsSettings
+         , li
+            [ changeSettingsMenuClass model.subView SocialAccountsSettings
                 |> class
             , onClick (ChangeSubView SocialAccountsSettings)
             ]
             [ text "Social Accounts" ]
-        ]
+         ]
+            ++ (if model.isAdmin == True && model.maxUsers > 1 then
+                    [ li
+                        [ changeSettingsMenuClass model.subView TeamSettings
+                            |> class
+                        , onClick (ChangeSubView TeamSettings)
+                        ]
+                        [ text "Team settings" ]
+                    ]
+
+                else
+                    []
+               )
+            ++ (if model.isAdmin == True then
+                    [ li
+                        [ changeSettingsMenuClass model.subView PaymentSettings
+                            |> class
+                        , onClick (ChangeSubView PaymentSettings)
+                        ]
+                        [ text "My Transactions" ]
+                    , li
+                        [ changeSettingsMenuClass model.subView BillingPlans
+                            |> class
+                        , onClick (ChangeSubView BillingPlans)
+                        ]
+                        [ text "Billing Plans" ]
+                    ]
+
+                else
+                    []
+               )
+        )
 
 
 viewTimezones : ( WebData (List Timezone), Int ) -> List (Html Msg)
@@ -309,6 +432,9 @@ accountSettingsView model =
         ]
 
 
+
+{--
+
 twitterConnectionButton : AccountConnection -> Html Msg
 twitterConnectionButton connection =
     case connection.connected of
@@ -334,6 +460,7 @@ twitterConnectionButton connection =
 
         False ->
             button [ onClick RequestConnectToken ] [ text "Connect" ]
+            --}
 
 
 profileSettingsView : Model -> Html Msg
@@ -345,8 +472,6 @@ profileSettingsView model =
             , span [] [ text "Default Timezone" ]
             , viewTimezones ( model.timezones, model.timezone )
                 |> select [ onInput StoreTimezone ]
-            , span [] [ text "Twitter Account" ]
-            , twitterConnectionButton model.twitter
             , button [ onClick UpdateProfile ] [ text "Update profile" ]
             ]
         , div [ class "avatar-settings-container" ]
@@ -358,70 +483,247 @@ profileSettingsView model =
         ]
 
 
+viewMember : Member -> Html Msg
+viewMember member =
+    let
+        avatar =
+            Page.Loading.getAvatarURL member.avatar
+
+        name =
+            case member.name of
+                Just name_ ->
+                    name_
+
+                Nothing ->
+                    "Team Member"
+    in
+    li [ class "plug" ]
+        [ img [ class "avatar", src avatar ] []
+        , span [ class "plug-name" ] [ text name ]
+        , span [ class "content" ] [ text member.email ]
+        ]
+
+
+viewTeam : List Member -> Html Msg
+viewTeam members =
+    div [ class "day" ]
+        [ ul []
+            (List.map viewMember members)
+        ]
+
+
+inviteMember : String -> Html Msg
+inviteMember invitees =
+    div []
+        [ div [ class "editor" ]
+            [ textarea [ placeholder "Enter invitee email by entering a comma between them", value invitees, onInput EnterInvitees ] []
+            ]
+        , span [ class "button" ] [ button [ onClick InviteMembers ] [ text "Invite" ] ]
+        ]
+
+
+teamSettingsView : Model -> Html Msg
+teamSettingsView model =
+    case model.members of
+        RemoteData.Success members ->
+            div [ class "team-settings" ]
+                [ div [ class "heading add-account" ]
+                    [ span []
+                        [ text "Team members" ]
+                    , span [ class "twitter-counter" ]
+                        [ span []
+                            [ text
+                                (String.concat
+                                    [ String.fromInt (List.length members)
+                                    , "/"
+                                    , String.fromInt model.maxUsers
+                                    ]
+                                )
+                            ]
+                        , span [ class "tweet-count-indicator" ]
+                            [ span
+                                [ class "tweet-count-progress"
+                                , style "width"
+                                    (String.concat
+                                        [ calculateAccountLimit (List.length members) (toFloat model.maxUsers)
+                                        , "rem"
+                                        ]
+                                    )
+                                ]
+                                []
+                            ]
+                        ]
+                    ]
+                , div [ class "heading" ] [ text "Invite members" ]
+                , viewTeam members
+                , inviteMember model.invitees
+                ]
+
+        RemoteData.NotAsked ->
+            Page.Loading.body
+
+        RemoteData.Loading ->
+            Page.Loading.body
+
+        RemoteData.Failure (Http.BadBody err) ->
+            Page.Loading.emptyState 80 err
+
+        RemoteData.Failure Http.NetworkError ->
+            Page.Loading.emptyState 80 "Oops! Looks like there is some problem with your network."
+
+        _ ->
+            Page.Loading.emptyState 80 "Oops! This looks like an unknown error. Contact support"
+
+
+viewSocialAccount : ToggledAccount -> SocialAccount -> Html Msg
+viewSocialAccount toggledSocial social =
+    let
+        socialIdString =
+            social.id
+                |> String.fromInt
+
+        settingsIconId =
+            socialIdString
+                |> (++) "settingsIcon"
+
+        socialMenuId =
+            socialIdString
+                |> (++) "postMenu"
+    in
+    li [ class "plug" ]
+        [ img [ class "avatar", src "/images/twitter.png" ] []
+        , span [ class "plug-name" ] [ text social.description ]
+        , span [ class "content" ] [ text "Twitter" ]
+        , img
+            [ id settingsIconId
+            , class "settings-icon"
+            , src "/images/settings.svg"
+            , onClick (ToggleSocialActions social.id)
+            ]
+            []
+        , span
+            [ id socialMenuId
+            , class "post-menu"
+            , style "display"
+                (case toggledSocial.social of
+                    Just socialId ->
+                        case socialId == social.id of
+                            True ->
+                                "block"
+
+                            False ->
+                                "none"
+
+                    Nothing ->
+                        "none"
+                )
+            ]
+            (case toggledSocial.askDeleteConfirmation of
+                True ->
+                    [ div [] [ text "Delete this social account?" ]
+                    , ul [ class "settings-menu" ]
+                        [ li [ onClick (DeleteSocial social.id) ] [ text "Yes" ]
+                        , li [ onClick TurnOffSocialMenu ] [ text "No" ]
+                        ]
+                    ]
+
+                False ->
+                    [ ul [ class "settings-menu" ]
+                        [ li [ onClick PromptDeleteSocial ] [ text "Delete" ]
+                        ]
+                    ]
+            )
+        ]
+
+
 socialAccountSettings : Model -> Html Msg
 socialAccountSettings model =
-    div [ class "social-account-settings" ]
-        [ div [ class "add-account" ]
-            [ span [ class "social-header" ]
-                [ text "Connect a new account" ]
-            , span [ class "twitter-counter" ]
-                [ span []
-                    [ text
-                        (String.concat
-                            [ String.fromInt 1
-                            , "/4"
+    case model.socials of
+        RemoteData.Success socials ->
+            div [ class "social-account-settings" ]
+                [ div [ class "add-account" ]
+                    [ span [ class "heading" ]
+                        [ text "Connect a new account" ]
+                    ]
+                , div [ class "platforms" ]
+                    [ div [ class "platform" ]
+                        [ img [ class "social-logo", src "/images/twitter.png" ] []
+                        , span [ class "platform-name" ] [ text "Twitter" ]
+                        , span [ class "platform-account" ] [ text "Profile" ]
+                        , span [ class "button" ]
+                            [ button [ onClick RequestConnectToken ] [ text "Connect" ]
                             ]
-                        )
-                    ]
-                , span [ class "tweet-count-indicator" ]
-                    [ span
-                        [ class "tweet-count-progress"
-                        , style "width"
-                            (String.concat
-                                [ calculateAccountLimit 1 4
-                                , "rem"
-                                ]
-                            )
                         ]
-                        []
+                    , div [ class "platform" ]
+                        [ img [ class "social-logo", src "/images/fb.png" ] []
+                        , span [ class "platform-name" ] [ text "Facebook" ]
+                        , span [ class "platform-account" ] [ text "Page or Group" ]
+                        , span [ class "button soon" ]
+                            [ button [] [ text "Soon" ]
+                            ]
+                        ]
+                    , div [ class "platform" ]
+                        [ img [ class "social-logo", src "/images/ig.png" ] []
+                        , span [ class "platform-name" ] [ text "Instagram" ]
+                        , span [ class "platform-account" ] [ text "Business account" ]
+                        , span [ class "button soon" ]
+                            [ button [] [ text "Soon" ]
+                            ]
+                        ]
+                    , div [ class "platform" ]
+                        [ img [ class "social-logo", src "/images/linkedin.png" ] []
+                        , span [ class "platform-name" ] [ text "LinkedIn" ]
+                        , span [ class "platform-account" ] [ text "Page or Profile" ]
+                        , span [ class "button soon" ]
+                            [ button [] [ text "Soon" ]
+                            ]
+                        ]
                     ]
-                ]
-            ]
-        , div [ class "platforms" ]
-            [ div [ class "platform" ]
-                [ img [ class "social-logo", src "/images/twitter.png" ] []
-                , span [ class "platform-name" ] [ text "Twitter" ]
-                , span [ class "platform-account" ] [ text "Profile" ]
-                , span [ class "button" ]
-                    [ button [] [ text "Connect" ]
+                , div [ class "add-account" ]
+                    [ span [ class "heading" ]
+                        [ text "Connected accounts" ]
+                    , span [ class "twitter-counter" ]
+                        [ span []
+                            [ text
+                                (String.concat
+                                    [ String.fromInt (List.length socials)
+                                    , "/"
+                                    , String.fromInt model.maxAccounts
+                                    ]
+                                )
+                            ]
+                        , span [ class "tweet-count-indicator" ]
+                            [ span
+                                [ class "tweet-count-progress"
+                                , style "width"
+                                    (String.concat
+                                        [ calculateAccountLimit (List.length socials) (toFloat model.maxAccounts)
+                                        , "rem"
+                                        ]
+                                    )
+                                ]
+                                []
+                            ]
+                        ]
                     ]
+                , List.map (\s -> ( String.fromInt s.id, viewSocialAccount model.toggledSocial s )) socials
+                    |> Html.Keyed.ul []
                 ]
-            , div [ class "platform" ]
-                [ img [ class "social-logo", src "/images/fb.png" ] []
-                , span [ class "platform-name" ] [ text "Facebook" ]
-                , span [ class "platform-account" ] [ text "Page or Group" ]
-                , span [ class "button" ]
-                    [ button [] [ text "Connect" ]
-                    ]
-                ]
-            , div [ class "platform" ]
-                [ img [ class "social-logo", src "/images/ig.png" ] []
-                , span [ class "platform-name" ] [ text "Instagram" ]
-                , span [ class "platform-account" ] [ text "Business account" ]
-                , span [ class "button" ]
-                    [ button [] [ text "Connect" ]
-                    ]
-                ]
-            , div [ class "platform" ]
-                [ img [ class "social-logo", src "/images/linkedin.png" ] []
-                , span [ class "platform-name" ] [ text "LinkedIn" ]
-                , span [ class "platform-account" ] [ text "Page or Profile" ]
-                , span [ class "button" ]
-                    [ button [] [ text "Connect" ]
-                    ]
-                ]
-            ]
-        ]
+
+        RemoteData.NotAsked ->
+            Page.Loading.body
+
+        RemoteData.Loading ->
+            Page.Loading.body
+
+        RemoteData.Failure (Http.BadBody err) ->
+            Page.Loading.emptyState 80 err
+
+        RemoteData.Failure Http.NetworkError ->
+            Page.Loading.emptyState 80 "Oops! Looks like there is some problem with your network."
+
+        _ ->
+            Page.Loading.emptyState 80 "Oops! This looks like an unknown error. Contact support"
 
 
 paymentSettingsView : Model -> Html Msg
@@ -508,6 +810,100 @@ paymentSettingsView model =
     --}
 
 
+viewPlan : Int -> Location -> Plan -> Html Msg
+viewPlan currentPlan location plan =
+    let
+        currency =
+            case location of
+                India ->
+                    "₹"
+
+                RoW ->
+                    "$"
+
+        price =
+            String.concat [ currency, String.fromInt plan.price, "/year" ]
+    in
+    li [ class "billing-plan" ]
+        [ span [] [ text plan.name ]
+        , span [] [ text price ]
+        , case currentPlan == plan.id of
+            True ->
+                span [ class "active" ] [ text "Active" ]
+
+            False ->
+                span [ class "button" ]
+                    [ button [ onClick (MakePayment plan.priceId) ] [ text "Make payment" ]
+                    ]
+        ]
+
+
+billingPlans : Model -> Html Msg
+billingPlans model =
+    case model.plans of
+        RemoteData.Success plans ->
+            let
+                plans_ =
+                    case model.location of
+                        India ->
+                            plans
+                                |> List.filter (\p -> p.symbol == "inr")
+
+                        RoW ->
+                            plans
+                                |> List.filter (\p -> p.symbol == "usd")
+            in
+            div [ class "billing-settings" ]
+                [ div [ class "heading" ] [ text "Billing Plans" ]
+                , div [ class "heading" ] [ text "Select your location" ]
+                , ul []
+                    (List.map (viewPlan model.yourPlan model.location) plans_)
+                , div []
+                    [ div [ class "country-selection" ]
+                        [ div
+                            [ class
+                                (case model.location of
+                                    India ->
+                                        "country active"
+
+                                    RoW ->
+                                        "country"
+                                )
+                            , onClick (ChangeCountry India)
+                            ]
+                            [ text "🇮🇳 India" ]
+                        , div
+                            [ class
+                                (case model.location of
+                                    India ->
+                                        "country"
+
+                                    RoW ->
+                                        "country active"
+                                )
+                            , onClick (ChangeCountry RoW)
+                            ]
+                            [ text "🌎 Other" ]
+                        ]
+                    ]
+                ]
+
+        RemoteData.NotAsked ->
+            Page.Loading.body
+
+        RemoteData.Loading ->
+            Page.Loading.body
+
+        RemoteData.Failure (Http.BadBody err) ->
+            Page.Loading.emptyState 80 err
+
+        RemoteData.Failure Http.NetworkError ->
+            Page.Loading.emptyState 80 "Oops! Looks like there is some problem with your network."
+
+        _ ->
+            Page.Loading.emptyState 80 "Oops! This looks like an unknown error. Contact support"
+
+
 viewSettingsForms : Model -> Html Msg
 viewSettingsForms model =
     case model.subView of
@@ -520,8 +916,14 @@ viewSettingsForms model =
         PaymentSettings ->
             paymentSettingsView model
 
+        TeamSettings ->
+            teamSettingsView model
+
         SocialAccountsSettings ->
             socialAccountSettings model
+
+        BillingPlans ->
+            billingPlans model
 
 
 body : Model -> Html Msg
@@ -543,7 +945,7 @@ body model =
                         [ div [ class "filters" ]
                             [ span [] [ text "Menu" ]
                             , span [ class "filter-box" ]
-                                [ settingsMenu model.subView
+                                [ settingsMenu model
                                 ]
                             ]
                         , div [ class "settings-board" ]
@@ -569,27 +971,105 @@ view model config =
         ]
 
 
+port setToggledSocialIds : Int -> Cmd msg
+
+
+port turnOffSocialMenu : (() -> msg) -> Sub msg
+
+
+subscriptions : Sub Msg
+subscriptions =
+    turnOffSocialMenu (always TurnOffSocialMenu)
+
+
 update : Msg -> Model -> Token -> ( Model, Cmd Msg )
 update msg model token =
     case msg of
-        DisconnectTwitter ->
+        TurnOffSocialMenu ->
+            ( { model
+                | toggledSocial =
+                    { social = Nothing
+                    , askDeleteConfirmation = False
+                    }
+              }
+            , Cmd.none
+            )
+
+        PromptDeleteSocial ->
+            let
+                currentToggledSocial =
+                    model.toggledSocial
+
+                new_toggleSocial =
+                    { currentToggledSocial
+                        | askDeleteConfirmation = True
+                    }
+            in
+            ( { model
+                | toggledSocial = new_toggleSocial
+              }
+            , Cmd.none
+            )
+
+        ToggleSocialActions socialId ->
+            case model.toggledSocial.social of
+                Just pid ->
+                    case pid == socialId of
+                        True ->
+                            ( { model
+                                | toggledSocial =
+                                    { social = Nothing
+                                    , askDeleteConfirmation = False
+                                    }
+                              }
+                            , Cmd.none
+                            )
+
+                        False ->
+                            ( { model
+                                | toggledSocial =
+                                    { social = Just socialId
+                                    , askDeleteConfirmation = False
+                                    }
+                              }
+                            , setToggledSocialIds socialId
+                            )
+
+                Nothing ->
+                    ( { model
+                        | toggledSocial =
+                            { social = Just socialId
+                            , askDeleteConfirmation = False
+                            }
+                      }
+                    , setToggledSocialIds socialId
+                    )
+
+        MakePayment priceId ->
+            ( model, switchPlan priceId )
+
+        ChangeCountry country ->
+            ( { model | location = country }, Cmd.none )
+
+        EnterInvitees invitees ->
+            ( { model | invitees = invitees }, Cmd.none )
+
+        InviteMembers ->
+            let
+                payload =
+                    model.invitees
+                        |> String.split ","
+                        |> List.map String.toLower
+                        |> List.map String.trim
+            in
+            ( { model | message = Just Message.Loading }, inviteMembers payload token )
+
+        DeleteSocial socialId ->
             ( { model
                 | message = Just Message.Loading
               }
-            , disconnectTwitter token
+            , disconnectSocial socialId token
             )
-
-        ToggleDisconnectButton bool ->
-            let
-                twitter =
-                    model.twitter
-
-                new_twitter =
-                    { twitter
-                        | showDisconnectButon = bool
-                    }
-            in
-            ( { model | twitter = new_twitter }, Cmd.none )
 
         PickAvatar ->
             ( model
@@ -649,21 +1129,88 @@ update msg model token =
                 _ ->
                     ( { model | transactions = response }, Cmd.none )
 
-        GotDeletedAccount (Ok _) ->
-            let
-                new_twitter =
-                    { connected = False
-                    , showDisconnectButon = False
-                    }
-            in
-            ( { model
-                | message = Just (Message.Success "Your twitter account has been disconnected")
-                , twitter = new_twitter
-              }
-            , Message.fadeMessage FadeMessage
-            )
+        GotMembers response ->
+            case response of
+                RemoteData.Success _ ->
+                    ( { model | members = response }, Cmd.none )
 
-        GotDeletedAccount (Err error) ->
+                RemoteData.Failure err ->
+                    case err of
+                        Http.BadStatus 401 ->
+                            ( model
+                            , Cmd.batch
+                                [ Api.deleteToken ()
+                                , Nav.load "/login"
+                                ]
+                            )
+
+                        _ ->
+                            ( { model | members = response }, Cmd.none )
+
+                _ ->
+                    ( { model | members = response }, Cmd.none )
+
+        GotSocialAccounts response ->
+            case response of
+                RemoteData.Success _ ->
+                    ( { model | socials = response }, Cmd.none )
+
+                RemoteData.Failure err ->
+                    case err of
+                        Http.BadStatus 401 ->
+                            ( model
+                            , Cmd.batch
+                                [ Api.deleteToken ()
+                                , Nav.load "/login"
+                                ]
+                            )
+
+                        _ ->
+                            ( { model | socials = response }, Cmd.none )
+
+                _ ->
+                    ( { model | socials = response }, Cmd.none )
+
+        GotPlans response ->
+            case response of
+                RemoteData.Success _ ->
+                    ( { model | plans = response }, Cmd.none )
+
+                RemoteData.Failure err ->
+                    case err of
+                        Http.BadStatus 401 ->
+                            ( model
+                            , Cmd.batch
+                                [ Api.deleteToken ()
+                                , Nav.load "/login"
+                                ]
+                            )
+
+                        _ ->
+                            ( { model | plans = response }, Cmd.none )
+
+                _ ->
+                    ( { model | plans = response }, Cmd.none )
+
+        GotDeletedAccount socialId (Ok _) ->
+            case model.socials of
+                RemoteData.Success socials ->
+                    let
+                        new_socials =
+                            socials
+                                |> List.filter (\p -> (p.id == socialId) == False)
+                    in
+                    ( { model
+                        | message = Just (Message.Success "Your twitter account has been disconnected")
+                        , socials = RemoteData.Success new_socials
+                      }
+                    , Message.fadeMessage FadeMessage
+                    )
+
+                _ ->
+                    ( model, Nav.reload )
+
+        GotDeletedAccount _ (Err error) ->
             case error of
                 Http.BadBody err ->
                     ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
@@ -720,7 +1267,12 @@ update msg model token =
             ( { model | avatar = Just url }, Cmd.none )
 
         ChangeSubView subview ->
-            ( { model | subView = subview }, Cmd.none )
+            case subview of
+                TeamSettings ->
+                    ( { model | subView = subview }, fetchMembers token )
+
+                _ ->
+                    ( { model | subView = subview }, Cmd.none )
 
         StoreTimezone timezoneId ->
             case String.toInt timezoneId of
@@ -779,6 +1331,40 @@ update msg model token =
                     ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
 
                 RemoteData.Failure (Http.BadStatus 401) ->
+                    ( model
+                    , Cmd.batch
+                        [ Api.deleteToken ()
+                        , Nav.load "/login"
+                        ]
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        GotInvitees result ->
+            case result of
+                Ok _ ->
+                    let
+                        message =
+                            "Yes! Invitation mails have been sent"
+                    in
+                    ( { model
+                        | message = Just (Message.Success message)
+                      }
+                    , Message.fadeMessage FadeMessage
+                    )
+
+                Err (Http.BadBody err) ->
+                    ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
+                Err Http.NetworkError ->
+                    let
+                        err =
+                            "Oops! Looks like there is some problem with your network."
+                    in
+                    ( { model | message = Just (Message.Failure err) }, Message.fadeMessage FadeMessage )
+
+                Err (Http.BadStatus 401) ->
                     ( model
                     , Cmd.batch
                         [ Api.deleteToken ()

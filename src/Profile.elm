@@ -17,6 +17,9 @@ type alias Profile =
 type alias AccountDetails =
     { id : Int
     , name : String
+    , maxUsers : Int
+    , maxAccounts : Int
+    , planId : Int
     , trialPeriod : Int
     , trialActive : Bool
     , subPeriod : Int
@@ -27,7 +30,8 @@ type alias AccountDetails =
 type alias Config =
     { profile : Maybe Profile
     , email : String
-    , twitterConnected : Bool
+    , socialAccounts : Bool
+    , isAdmin : Bool
     , account : AccountDetails
     }
 
@@ -41,6 +45,9 @@ accountDecoder =
     Decode.succeed AccountDetails
         |> required "id" int
         |> required "name" string
+        |> required "max_users" int
+        |> required "max_accounts" int
+        |> required "plan_id" int
         |> required "trial_period" int
         |> required "trial_active" bool
         |> optional "current_period_end" int 0
@@ -62,7 +69,8 @@ configDecoder =
         (Decode.succeed Config
             |> required "profile" (nullable profileDecoder)
             |> required "email" string
-            |> required "twitter" bool
+            |> required "social_accounts" bool
+            |> required "is_admin" bool
             |> required "account" accountDecoder
         )
 
@@ -101,7 +109,7 @@ displayOnboardingMessage : WebData Config -> MessageBanner
 displayOnboardingMessage conf =
     case conf of
         RemoteData.Success config ->
-            case config.twitterConnected of
+            case config.socialAccounts of
                 True ->
                     Nothing
 

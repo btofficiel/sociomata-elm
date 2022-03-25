@@ -187,6 +187,7 @@ toEncodedTweets tweets =
 tweetsEncoder :
     { timestamp : Maybe Int
     , plug : Maybe Int
+    , social : Maybe Int
     , media : List PresignedURL
     , tweets :
         List
@@ -200,6 +201,7 @@ tweetsEncoder model =
     Encode.object
         [ ( "recurring", Encode.bool False )
         , ( "plug_id", encodeNullable Encode.int model.plug )
+        , ( "social_account", encodeNullable Encode.int model.social )
         , ( "category_id", Encode.null )
         , ( "timestamp", encodeNullable Encode.int model.timestamp )
         , ( "tweets", Encode.list tweetEncoder (toEncodedTweets model.tweets) )

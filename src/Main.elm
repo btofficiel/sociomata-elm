@@ -229,12 +229,6 @@ initCurrentPage ( model, existingCmds ) =
                         ( updatedPageModel, updatePageCmds ) =
                             case model.config of
                                 RemoteData.Success config ->
-                                    let
-                                        twitter =
-                                            { connected = config.twitterConnected
-                                            , showDisconnectButon = False
-                                            }
-                                    in
                                     case config.profile of
                                         Just profile ->
                                             ( { pageModel
@@ -242,7 +236,10 @@ initCurrentPage ( model, existingCmds ) =
                                                 , timezone = profile.timezoneId
                                                 , avatar = profile.avatar
                                                 , email = config.email
-                                                , twitter = twitter
+                                                , isAdmin = config.isAdmin
+                                                , maxUsers = config.account.maxUsers
+                                                , maxAccounts = config.account.maxAccounts
+                                                , yourPlan = config.account.planId
                                               }
                                             , pageCmds
                                             )
@@ -250,7 +247,6 @@ initCurrentPage ( model, existingCmds ) =
                                         Nothing ->
                                             ( { pageModel
                                                 | email = config.email
-                                                , twitter = twitter
                                               }
                                             , pageCmds
                                             )
@@ -584,18 +580,11 @@ update msg model =
                         _ ->
                             ( { model | page = SettingsPage updatedPageModel }, Cmd.map SettingsMsg updateCmds )
 
-                Settings.GotDeletedAccount (Ok _) ->
+                Settings.GotDeletedAccount _ (Ok _) ->
                     case model.config of
                         RemoteData.Success config ->
-                            let
-                                new_config =
-                                    { config
-                                        | twitterConnected = False
-                                    }
-                            in
                             ( { model
                                 | page = SettingsPage updatedPageModel
-                                , config = RemoteData.Success new_config
                               }
                             , Cmd.map SettingsMsg updateCmds
                             )
@@ -641,6 +630,10 @@ subscriptions model =
             PlugsPage _ ->
                 Plugs.subscriptions
                     |> Sub.map PlugsMsg
+
+            SettingsPage _ ->
+                Settings.subscriptions
+                    |> Sub.map SettingsMsg
 
             _ ->
                 Sub.none

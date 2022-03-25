@@ -16,7 +16,7 @@ import Http
 import Iso8601
 import Json.Decode as D exposing (Decoder, at, field, int, map2, string)
 import MessageBanner as Message exposing (MessageBanner)
-import Page.CreatePost exposing (FileBatch, FileTuple, SelectedPlug, buildBatch, fileToTuple, resetTextArea, resizeTextArea, uploadMediaTask)
+import Page.CreatePost exposing (FileBatch, FileTuple, SelectedPlug, SelectedSocial, buildBatch, fileToTuple, resetTextArea, resizeTextArea, uploadMediaTask)
 import Page.Loading
 import Plug exposing (Plug, plugsDecoder)
 import Post exposing (Post, twitterPostDecoder)
@@ -24,6 +24,7 @@ import Profile exposing (Config)
 import RemoteData exposing (WebData)
 import Request
 import Route exposing (Token)
+import SocialAccount exposing (SocialAccount, socialAccountsDecoder)
 import Task
 import Time
 import Tuple
@@ -50,6 +51,8 @@ type alias Model =
     , plugs : WebData (List Plug)
     , plug : SelectedPlug
     , fileBatch : List FileBatch
+    , socials : WebData (List SocialAccount)
+    , social : SelectedSocial
     , postId : Int
     , post : WebData Post
     , toggleMenu : Bool
@@ -76,8 +79,13 @@ type Msg
     | TurnOffSelectPlug
     | SelectPlug Int
     | RemovePlug
+    | ToggleSelectSocial
+    | TurnOffSelectSocial
+    | SelectSocial Int
+    | RemoveSocial
     | GotPost (WebData Post)
     | GotPlugs (WebData (List Plug))
+    | GotSocialAccounts (WebData (List SocialAccount))
     | GotEditedPost (Result Http.Error ())
     | ToggleMenu
     | NoOp
@@ -117,6 +125,19 @@ fetchPost token postId =
         }
 
 
+fetchSocialAccounts : Token -> Cmd Msg
+fetchSocialAccounts token =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" token ]
+        , url = "/api/socials"
+        , body = Http.emptyBody
+        , expect = Request.expectJson (RemoteData.fromResult >> GotSocialAccounts) socialAccountsDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
 init : Int -> Token -> ( Model, Cmd Msg )
 init postId token =
     let
@@ -135,6 +156,11 @@ init postId token =
             , toggled = False
             }
       , fileBatch = []
+      , socials = RemoteData.Loading
+      , social =
+            { socialId = Nothing
+            , toggled = False
+            }
       , postId = postId
       , post = RemoteData.Loading
       , toggleMenu = False
@@ -142,6 +168,7 @@ init postId token =
     , Cmd.batch
         [ DateTime.getNewTime GenerateDefaultTime
         , fetchPost token postId
+        , fetchSocialAccounts token
         , fetchPlugs token
         ]
     )
@@ -152,6 +179,7 @@ schedulePost :
     ->
         { tweets : List Tweet
         , plug : Maybe Int
+        , social : Maybe Int
         , timestamp : Maybe Int
         , media : List PresignedURL
         }
@@ -353,6 +381,85 @@ viewSelectPlug plugId plugs =
             span [ id "selectPlug" ] [ text "Oop! Please reload" ]
 
 
+viewSocial : SocialAccount -> Html Msg
+viewSocial social =
+    li [ onClick (SelectSocial social.id) ] [ text social.description ]
+
+
+viewSocials : WebData (List SocialAccount) -> SelectedSocial -> Html Msg
+viewSocials socials selectedSocial =
+    case socials of
+        RemoteData.Success socials_ ->
+            span
+                [ class "plug-options"
+                , id "selectSocialOptions"
+                , style "display"
+                    (case selectedSocial.toggled of
+                        True ->
+                            "block"
+
+                        False ->
+                            "none"
+                    )
+                ]
+                [ ul [ class "settings-menu" ]
+                    ((case selectedSocial.socialId of
+                        Just _ ->
+                            [ li
+                                [ style "font-weight" "700"
+                                , style "opacity" "0.5"
+                                , onClick RemoveSocial
+                                ]
+                                [ text "Remove Account" ]
+                            ]
+
+                        Nothing ->
+                            []
+                     )
+                        ++ (socials_
+                                |> List.map viewSocial
+                           )
+                    )
+                ]
+
+        _ ->
+            span [ style "display" "none" ] []
+
+
+viewSelectSocial : Maybe Int -> WebData (List SocialAccount) -> Html Msg
+viewSelectSocial socialId socials =
+    case socials of
+        RemoteData.Success socials_ ->
+            case socialId of
+                Just id_ ->
+                    let
+                        foundSocial =
+                            socials_
+                                |> List.filter (\p -> p.id == id_)
+                                |> List.head
+                    in
+                    case foundSocial of
+                        Just social_ ->
+                            span [ id "selectSocial", style "font-weight" "500", onClick ToggleSelectSocial ] [ text social_.description ]
+
+                        Nothing ->
+                            span [ id "selectSocial" ] [ text "Oop! Please reload" ]
+
+                Nothing ->
+                    case List.length socials_ > 0 of
+                        True ->
+                            span [ id "selectSocial", onClick ToggleSelectSocial ] [ text "Select a social account" ]
+
+                        False ->
+                            span [ id "selectSocial" ] [ text " You don't have social accounts" ]
+
+        RemoteData.Loading ->
+            span [ id "selectSocial" ] [ text "Loading accounts..." ]
+
+        _ ->
+            span [ id "selectSocial" ] [ text "Oop! Please reload" ]
+
+
 viewOptions : Model -> Offset -> Html Msg
 viewOptions model offset =
     div []
@@ -371,6 +478,12 @@ viewOptions model offset =
             , div [ class "select-plug" ]
                 [ viewSelectPlug model.plug.plugId model.plugs
                 , viewPlugs model.plugs model.plug
+                ]
+            , span [ class "w-option-name" ]
+                [ text "Social Account" ]
+            , div [ class "select-plug" ]
+                [ viewSelectSocial model.social.socialId model.socials
+                , viewSocials model.socials model.social
                 ]
             ]
         , span [ class "button" ]
@@ -438,14 +551,76 @@ view model config =
 port turnOffEPSelectPlug : (() -> msg) -> Sub msg
 
 
+port turnOffEPSelectSocial : (() -> msg) -> Sub msg
+
+
 subscriptions : Sub Msg
 subscriptions =
-    turnOffEPSelectPlug (always TurnOffSelectPlug)
+    Sub.batch
+        [ turnOffEPSelectPlug (always TurnOffSelectPlug)
+        , turnOffEPSelectSocial (always TurnOffSelectSocial)
+        ]
 
 
 update : Msg -> Model -> Offset -> Token -> ( Model, Cmd Msg )
 update msg model offset token =
     case msg of
+        TurnOffSelectSocial ->
+            let
+                social =
+                    model.social
+
+                new_social =
+                    { social | toggled = False }
+            in
+            ( { model
+                | social = new_social
+              }
+            , Cmd.none
+            )
+
+        RemoveSocial ->
+            let
+                social =
+                    model.social
+
+                new_social =
+                    { social | socialId = Nothing, toggled = False }
+            in
+            ( { model
+                | social = new_social
+              }
+            , Cmd.none
+            )
+
+        SelectSocial socialId ->
+            let
+                social =
+                    model.social
+
+                new_social =
+                    { social | socialId = Just socialId, toggled = False }
+            in
+            ( { model
+                | social = new_social
+              }
+            , Cmd.none
+            )
+
+        ToggleSelectSocial ->
+            let
+                social =
+                    model.social
+
+                new_social =
+                    { social | toggled = not model.social.toggled }
+            in
+            ( { model
+                | social = new_social
+              }
+            , Cmd.none
+            )
+
         TurnOffSelectPlug ->
             let
                 plug =
@@ -502,6 +677,27 @@ update msg model offset token =
             , Cmd.none
             )
 
+        GotSocialAccounts response ->
+            case response of
+                RemoteData.Success _ ->
+                    ( { model | socials = response }, Cmd.none )
+
+                RemoteData.Failure err ->
+                    case err of
+                        Http.BadStatus 401 ->
+                            ( model
+                            , Cmd.batch
+                                [ Api.deleteToken ()
+                                , Nav.load "/login"
+                                ]
+                            )
+
+                        _ ->
+                            ( { model | socials = response }, Cmd.none )
+
+                _ ->
+                    ( { model | socials = response }, Cmd.none )
+
         GotPlugs response ->
             case response of
                 RemoteData.Failure (Http.BadBody err) ->
@@ -532,6 +728,7 @@ update msg model offset token =
                         payload =
                             { tweets = model.tweets
                             , plug = model.plug.plugId
+                            , social = model.social.socialId
                             , timestamp = model.timestamp
                             , media = media
                             }
@@ -707,6 +904,12 @@ update msg model offset token =
                         new_plug =
                             { plug | plugId = post.plugId }
 
+                        social =
+                            model.social
+
+                        new_social =
+                            { social | socialId = post.socialId }
+
                         tweets =
                             post.tweets
                                 |> List.map
@@ -720,6 +923,7 @@ update msg model offset token =
                     ( { model
                         | timestamp = Just (Post.timestampToInt post.timestamp)
                         , plug = new_plug
+                        , social = new_social
                         , tweets = tweets
                         , post = RemoteData.Success Post.pseudoPost
                       }

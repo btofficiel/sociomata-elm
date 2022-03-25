@@ -13,6 +13,7 @@ type alias Post =
     , recurring : Bool
     , description : String
     , plugId : Maybe Int
+    , socialId : Maybe Int
     , categoryId : Maybe CategoryId
     , status : Int
     , tweets : List Tweet
@@ -80,6 +81,7 @@ postDecoder postType =
                 |> required "recurring" bool
                 |> required "description" string
                 |> required "plug_id" (nullable int)
+                |> required "social_account" (nullable int)
                 |> required "category_id" (nullable categoryIdDecoder)
                 |> required "status" int
 
@@ -123,6 +125,7 @@ pseudoPost =
     , recurring = False
     , description = ""
     , plugId = Nothing
+    , socialId = Nothing
     , categoryId = Nothing
     , status = -1
     , tweets = []
