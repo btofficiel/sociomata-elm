@@ -121,6 +121,7 @@ viewOptions model =
                     , class "schedule-time"
                     , onInput EnterName
                     , value model.name
+                    , placeholder "Enter plug name"
                     ]
                     []
                 ]

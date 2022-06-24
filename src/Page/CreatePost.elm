@@ -77,6 +77,7 @@ type alias Model =
     , plug : SelectedPlug
     , social : SelectedSocial
     , fileBatch : List FileBatch
+    , postSettings : PostSettings
     }
 
 
@@ -88,6 +89,11 @@ type ActionType
 
 type alias FileTuple =
     ( File, String )
+
+
+type PostSettings
+    = Basic
+    | Advanced
 
 
 type Msg
@@ -118,6 +124,7 @@ type Msg
     | SelectSocial Int
     | RemoveSocial
     | GotCreatedPost ActionType (Result Http.Error ())
+    | SwitchPostSettings PostSettings
     | NoOp
 
 
@@ -144,6 +151,7 @@ init token query =
             , toggled = False
             }
       , fileBatch = []
+      , postSettings = Basic
       }
     , Cmd.batch
         [ DateTime.getNewTime GenerateDefaultTime
@@ -619,32 +627,90 @@ viewSelectSocial socialId socials =
             span [ id "selectSocial" ] [ text "Oop! Please reload" ]
 
 
+switchPostSettings : Model -> Offset -> Html Msg
+switchPostSettings model offset =
+    case model.postSettings of
+        Basic ->
+            span [ class "option-name-value" ]
+                [ span [ class "w-option-name" ]
+                    [ text "Schedule Time" ]
+                , input
+                    [ type_ "datetime-local"
+                    , class "schedule-time"
+                    , onInput EnterTime
+                    , value (timestampToHumanTime model.timestamp offset)
+                    ]
+                    []
+                , span [ class "w-option-name" ]
+                    [ text "Plug" ]
+                , div [ class "select-plug" ]
+                    [ viewSelectPlug model.plug.plugId model.plugs
+                    , viewPlugs model.plugs model.plug
+                    ]
+                , span [ class "w-option-name" ]
+                    [ text "Social Account" ]
+                , div [ class "select-plug" ]
+                    [ viewSelectSocial model.social.socialId model.socials
+                    , viewSocials model.socials model.social
+                    ]
+                ]
+
+        Advanced ->
+            span [ class "option-name-value" ]
+                [ span [ class "w-option-name" ]
+                    [ text "Schedule Time" ]
+                , input
+                    [ type_ "datetime-local"
+                    , class "schedule-time"
+                    , onInput EnterTime
+                    , value (timestampToHumanTime model.timestamp offset)
+                    ]
+                    []
+                , span [ class "w-option-name" ]
+                    [ text "Plug" ]
+                , div [ class "select-plug" ]
+                    [ viewSelectPlug model.plug.plugId model.plugs
+                    , viewPlugs model.plugs model.plug
+                    ]
+                , span [ class "w-option-name" ]
+                    [ text "Social Account" ]
+                , div [ class "select-plug" ]
+                    [ viewSelectSocial model.social.socialId model.socials
+                    , viewSocials model.socials model.social
+                    ]
+                , span [ class "w-option-name" ]
+                    [ text "Auto Plug" ]
+                , div [ class "auto-plug" ]
+                    [ select []
+                        [ option [] [ text "None" ]
+                        , option [] [ text "Likes" ]
+                        , option [] [ text "Retweets" ]
+                        , option [] [ text "Quotes" ]
+                        , option [] [ text "Send after (hours)" ]
+                        ]
+                    , input [ placeholder "Number" ] []
+                    ]
+                ]
+
+
+activePostSetting : PostSettings -> PostSettings -> String
+activePostSetting currentPostSetting postSetting =
+    case currentPostSetting == postSetting of
+        True ->
+            "active"
+
+        False ->
+            ""
+
+
 viewOptions : Model -> Offset -> Html Msg
 viewOptions model offset =
     div []
-        [ span [ class "option-name-value" ]
-            [ span [ class "w-option-name" ]
-                [ text "Schedule Time" ]
-            , input
-                [ type_ "datetime-local"
-                , class "schedule-time"
-                , onInput EnterTime
-                , value (timestampToHumanTime model.timestamp offset)
-                ]
-                []
-            , span [ class "w-option-name" ]
-                [ text "Plug" ]
-            , div [ class "select-plug" ]
-                [ viewSelectPlug model.plug.plugId model.plugs
-                , viewPlugs model.plugs model.plug
-                ]
-            , span [ class "w-option-name" ]
-                [ text "Social Account" ]
-            , div [ class "select-plug" ]
-                [ viewSelectSocial model.social.socialId model.socials
-                , viewSocials model.socials model.social
-                ]
+        [ div [ class "post-settings-type" ]
+            [ span [ class (activePostSetting model.postSettings Basic), onClick (SwitchPostSettings Basic) ] [ text "Basic" ]
+            , span [ class (activePostSetting model.postSettings Advanced), onClick (SwitchPostSettings Advanced) ] [ text "Advanced" ]
             ]
+        , switchPostSettings model offset
         , span [ class "buttons" ]
             [ button [ onClick SaveDraft ] [ text "Save Draft" ]
             , button [ onClick TrySchedulePost ] [ text "Schedule" ]
@@ -706,6 +772,13 @@ subscriptions =
 update : Msg -> Model -> Offset -> Token -> ( Model, Cmd Msg )
 update msg model offset token =
     case msg of
+        SwitchPostSettings postSettings ->
+            ( { model
+                | postSettings = postSettings
+              }
+            , Cmd.none
+            )
+
         TurnOffSelectSocial ->
             let
                 social =
